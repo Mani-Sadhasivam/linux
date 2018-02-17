@@ -180,6 +180,57 @@
 			clocks = <&cmu CLK_GPIO>;
 		};
 
+		gpioa: gpio@e01b0000 {
+			compatible = "actions,s900-gpio";
+			reg = <0x0 0xe01b0000 0x0 0x000c>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-ranges = <&pinctrl 0 0 32>;
+		};
+
+		gpiob: gpio@e01b000c {
+			compatible = "actions,s900-gpio";
+			reg = <0x0 0xe01b000c 0x0 0x000c>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-ranges = <&pinctrl 0 32 32>;
+		};
+
+		gpioc: gpio@e01b0018 {
+			compatible = "actions,s900-gpio";
+			reg = <0x0 0xe01b0018 0x0 0x000c>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-ranges = <&pinctrl 0 64 12>;
+			ngpios = <12>;
+		};
+
+		gpiod: gpio@e01b0024 {
+			compatible = "actions,s900-gpio";
+			reg = <0x0 0xe01b0024 0x0 0x000c>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-ranges = <&pinctrl 0 76 30>;
+			ngpios = <30>;
+		};
+
+		gpioe: gpio@e01b0030 {
+			compatible = "actions,s900-gpio";
+			reg = <0x0 0xe01b0030 0x0 0x000c>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-ranges = <&pinctrl 0 106 32>;
+		};
+
+		gpiof: gpio@e01b00f0 {
+			compatible = "actions,s900-gpio";
+			reg = <0x0 0xe01b00f0 0x0 0x000c>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-ranges = <&pinctrl 0 138 8>;
+			ngpios = <8>;
+		};
+
 		timer: timer@e0228000 {
 			compatible = "actions,s900-timer";
 			reg = <0x0 0xe0228000 0x0 0x8000>;
