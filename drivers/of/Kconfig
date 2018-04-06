@@ -102,4 +102,13 @@ config OF_OVERLAY
 config OF_NUMA
 	bool
 
+config OF_OVERLAY_MGR
+	bool "Device Tree overlay manager"
+	default n
+	depends on OF_OVERLAY
+	help
+	  Device Tree overlay manager is used to merge overlays specified
+	  using kernel command line. Appropriate overlays needs to be stored
+	  under the firmware directory of Root File System.
+
 endif # OF
