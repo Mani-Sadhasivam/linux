@@ -45,6 +45,8 @@ struct owl_pinctrl {
 	struct clk *clk;
 	const struct owl_pinctrl_soc_data *soc;
 	void __iomem *base;
+	struct irq_domain *domain;
+	int *irq;
 };
 
 static void owl_update_bits(void __iomem *base, u32 mask, u32 val)
@@ -701,16 +703,193 @@ static int owl_gpio_direction_output(struct gpio_chip *chip,
 	return 0;
 }
 
+static int owl_gpio_to_irq(struct gpio_chip *chip, unsigned int offset)
+{
+	struct owl_pinctrl *pctrl = gpiochip_get_data(chip);
+
+	return irq_find_mapping(pctrl->domain, offset);
+}
+
+static void owl_gpio_irq_mask(struct irq_data *data)
+{
+	struct owl_pinctrl *pctrl = irq_data_get_irq_chip_data(data);
+	const struct owl_gpio_port *port;
+	void __iomem *gpio_base;
+	unsigned long flags;
+	unsigned int gpio = data->hwirq;
+	u32 val;
+
+	port = owl_gpio_get_port(pctrl, &gpio);
+	if (WARN_ON(port == NULL))
+		return;
+
+	gpio_base = pctrl->base + port->offset;
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+
+	owl_gpio_update_reg(gpio_base + port->intc_msk, gpio, false);
+
+	/* disable port interrupt if no interrupt pending bit is active */
+	val = readl_relaxed(gpio_base + port->intc_msk);
+	if (val == 0)
+		owl_gpio_update_reg(gpio_base + port->intc_ctl,
+					OWL_GPIO_CTLR_ENABLE, false);
+
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+}
+
+static void owl_gpio_irq_unmask(struct irq_data *data)
+{
+	struct owl_pinctrl *pctrl = irq_data_get_irq_chip_data(data);
+	const struct owl_gpio_port *port;
+	void __iomem *gpio_base;
+	unsigned long flags;
+	unsigned int gpio = data->hwirq;
+	u32 value;
+
+	port = owl_gpio_get_port(pctrl, &gpio);
+	if (WARN_ON(port == NULL))
+		return;
+
+	gpio_base = pctrl->base + port->offset;
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+
+	/* enable port interrupt */
+	value = readl_relaxed(gpio_base + port->intc_ctl);
+	value |= BIT(OWL_GPIO_CTLR_ENABLE) | BIT(OWL_GPIO_CTLR_SAMPLE_CLK_24M);
+	writel_relaxed(value, gpio_base + port->intc_ctl);
+
+	/* enable GPIO interrupt */
+	owl_gpio_update_reg(gpio_base + port->intc_msk, gpio, true);
+
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+}
+
+static void owl_gpio_irq_ack(struct irq_data *data)
+{
+	struct owl_pinctrl *pctrl = irq_data_get_irq_chip_data(data);
+	const struct owl_gpio_port *port;
+	void __iomem *gpio_base;
+	unsigned long flags;
+	unsigned int gpio = data->hwirq;
+
+	port = owl_gpio_get_port(pctrl, &gpio);
+	if (WARN_ON(port == NULL))
+		return;
+
+	gpio_base = pctrl->base + port->offset;
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+
+	owl_gpio_update_reg(gpio_base + port->intc_ctl,
+				OWL_GPIO_CTLR_PENDING, true);
+
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+}
+
+static int owl_gpio_irq_set_type(struct irq_data *data, unsigned int type)
+{
+	struct owl_pinctrl *pctrl = irq_data_get_irq_chip_data(data);
+	const struct owl_gpio_port *port;
+	void __iomem *gpio_base;
+	unsigned long flags;
+	unsigned int gpio = data->hwirq;
+	unsigned int offset, value, irq_type = 0;
+
+	port = owl_gpio_get_port(pctrl, &gpio);
+	if (WARN_ON(port == NULL))
+		return -ENODEV;
+
+	gpio_base = pctrl->base + port->offset;
+
+	switch (type) {
+	case IRQ_TYPE_EDGE_RISING:
+		irq_type = OWL_GPIO_INT_EDGE_RISING;
+		break;
+
+	case IRQ_TYPE_EDGE_FALLING:
+		irq_type = OWL_GPIO_INT_EDGE_FALLING;
+		break;
+
+	case IRQ_TYPE_LEVEL_HIGH:
+		irq_type = OWL_GPIO_INT_LEVEL_HIGH;
+		break;
+
+	case IRQ_TYPE_LEVEL_LOW:
+		irq_type = OWL_GPIO_INT_LEVEL_LOW;
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+
+	offset = gpio < 16 ? 4 : 0;
+	value = readl_relaxed(gpio_base + port->intc_type + offset);
+	value &= ~(OWL_GPIO_INT_MASK << ((gpio % 16) * 2));
+	value |= irq_type << ((gpio % 16) * 2);
+	writel_relaxed(value, gpio_base + port->intc_type + offset);
+
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+
+	if (type & IRQ_TYPE_EDGE_BOTH)
+		irq_set_handler_locked(data, handle_edge_irq);
+	else
+		irq_set_handler_locked(data, handle_level_irq);
+
+	return 0;
+}
+
+static void owl_gpio_irq_handler(struct irq_desc *desc)
+{
+	struct owl_pinctrl *pctrl = irq_desc_get_handler_data(desc);
+	struct irq_chip *chip = irq_desc_get_chip(desc);
+	const struct owl_gpio_port *port;
+	void __iomem *base;
+	unsigned int pin, irq, offset = 0, i;
+	unsigned long pending_irq;
+
+	chained_irq_enter(chip, desc);
+
+	for (i = 0; i < pctrl->soc->nports; i++) {
+		port = &pctrl->soc->ports[i];
+		base = pctrl->base + port->offset;
+		pending_irq = readl_relaxed(base + port->intc_pd);
+
+		for_each_set_bit(pin, &pending_irq, port->pins) {
+			irq = irq_find_mapping(pctrl->domain, offset + pin);
+			generic_handle_irq(irq);
+
+			/* clear pending interrupt */
+			owl_gpio_update_reg(base + port->intc_pd, pin, true);
+		}
+
+		offset += port->pins;
+	}
+
+	chained_irq_exit(chip, desc);
+}
+
+static struct irq_chip owl_gpio_irq_chip = {
+	.name           = "owlgpio",
+	.irq_mask       = owl_gpio_irq_mask,
+	.irq_unmask     = owl_gpio_irq_unmask,
+	.irq_ack        = owl_gpio_irq_ack,
+	.irq_set_type   = owl_gpio_irq_set_type,
+};
+
 static int owl_gpio_init(struct owl_pinctrl *pctrl)
 {
 	struct gpio_chip *chip;
-	int ret;
+	int irqno, ret, i;
 
 	chip = &pctrl->chip;
 	chip->base = -1;
 	chip->ngpio = pctrl->soc->ngpios;
 	chip->label = dev_name(pctrl->dev);
 	chip->parent = pctrl->dev;
+	chip->to_irq = owl_gpio_to_irq;
 	chip->owner = THIS_MODULE;
 	chip->of_node = pctrl->dev->of_node;
 
@@ -718,6 +897,29 @@ static int owl_gpio_init(struct owl_pinctrl *pctrl)
 	if (ret) {
 		dev_err(pctrl->dev, "failed to register gpiochip\n");
 		return ret;
+	}
+
+	pctrl->domain = irq_domain_add_linear(chip->of_node,
+					     chip->ngpio,
+					     &irq_domain_simple_ops,
+					     NULL);
+	if (!pctrl->domain) {
+		dev_err(pctrl->dev, "Couldn't register IRQ domain\n");
+		gpiochip_remove(&pctrl->chip);
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < chip->ngpio; i++) {
+		irqno = irq_create_mapping(pctrl->domain, i);
+		irq_set_chip_and_handler(irqno, &owl_gpio_irq_chip,
+					 handle_edge_irq);
+		irq_set_chip_data(irqno, pctrl);
+	}
+
+	for (i = 0; i < pctrl->soc->nports; i++) {
+		irq_set_chained_handler_and_data(pctrl->irq[i],
+						owl_gpio_irq_handler,
+						pctrl);
 	}
 
 	return 0;
@@ -728,7 +930,7 @@ int owl_pinctrl_probe(struct platform_device *pdev,
 {
 	struct resource *res;
 	struct owl_pinctrl *pctrl;
-	int ret;
+	int ret, i;
 
 	pctrl = devm_kzalloc(&pdev->dev, sizeof(*pctrl), GFP_KERNEL);
 	if (!pctrl)
@@ -772,14 +974,35 @@ int owl_pinctrl_probe(struct platform_device *pdev,
 					&owl_pinctrl_desc, pctrl);
 	if (IS_ERR(pctrl->pctrldev)) {
 		dev_err(&pdev->dev, "could not register Actions OWL pinmux driver\n");
-		return PTR_ERR(pctrl->pctrldev);
+		ret = PTR_ERR(pctrl->pctrldev);
+		goto err_exit;
+	}
+
+	pctrl->irq = devm_kcalloc(&pdev->dev, pctrl->soc->nports,
+				  sizeof(*pctrl->irq), GFP_KERNEL);
+	if (!pctrl->irq) {
+		ret = -ENOMEM;
+		goto err_exit;
+	}
+
+	for (i = 0; i < pctrl->soc->nports ; i++) {
+		pctrl->irq[i] = platform_get_irq(pdev, i);
+		if (pctrl->irq[i] < 0) {
+			ret = pctrl->irq[i];
+			goto err_exit;
+		}
 	}
 
 	ret = owl_gpio_init(pctrl);
 	if (ret)
-		return ret;
+		goto err_exit;
 
 	platform_set_drvdata(pdev, pctrl);
 
 	return 0;
+
+err_exit:
+	clk_disable_unprepare(pctrl->clk);
+
+	return ret;
 }
