@@ -30,12 +30,12 @@
 /* The hyp-stub will return this for any kvm_call_hyp() call */
 #define ARM_EXCEPTION_HYP_GONE	  HVC_STUB_ERR
 
+#define	VCPU_WORKAROUND_2_FLAG_SHIFT	0
+#define	VCPU_WORKAROUND_2_FLAG		(_AC(1, UL) << VCPU_WORKAROUND_2_FLAG_SHIFT)
+
 #ifndef __ASSEMBLY__
 
 #include <linux/mm.h>
-
-#define	VCPU_WORKAROUND_2_FLAG_SHIFT	0
-#define	VCPU_WORKAROUND_2_FLAG		(_AC(1, UL) << VCPU_WORKAROUND_2_FLAG_SHIFT)
 
 /* Translate a kernel address of @sym into its equivalent linear mapping */
 #define kvm_ksym_ref(sym)						\
