@@ -13,6 +13,7 @@
 #include <linux/err.h>
 #include <linux/gpio/driver.h>
 #include <linux/io.h>
+#include <linux/irq.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -45,8 +46,9 @@ struct owl_pinctrl {
 	struct clk *clk;
 	const struct owl_pinctrl_soc_data *soc;
 	void __iomem *base;
-	struct irq_domain *domain;
-	int *irq;
+	struct irq_chip irq_chip;
+	unsigned int num_irq;
+	unsigned int *irq;
 };
 
 static void owl_update_bits(void __iomem *base, u32 mask, u32 val)
@@ -703,16 +705,10 @@ static int owl_gpio_direction_output(struct gpio_chip *chip,
 	return 0;
 }
 
-static int owl_gpio_to_irq(struct gpio_chip *chip, unsigned int offset)
-{
-	struct owl_pinctrl *pctrl = gpiochip_get_data(chip);
-
-	return irq_find_mapping(pctrl->domain, offset);
-}
-
 static void owl_gpio_irq_mask(struct irq_data *data)
 {
-	struct owl_pinctrl *pctrl = irq_data_get_irq_chip_data(data);
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(data);
+	struct owl_pinctrl *pctrl = gpiochip_get_data(gc);
 	const struct owl_gpio_port *port;
 	void __iomem *gpio_base;
 	unsigned long flags;
@@ -740,7 +736,8 @@ static void owl_gpio_irq_mask(struct irq_data *data)
 
 static void owl_gpio_irq_unmask(struct irq_data *data)
 {
-	struct owl_pinctrl *pctrl = irq_data_get_irq_chip_data(data);
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(data);
+	struct owl_pinctrl *pctrl = gpiochip_get_data(gc);
 	const struct owl_gpio_port *port;
 	void __iomem *gpio_base;
 	unsigned long flags;
@@ -767,7 +764,8 @@ static void owl_gpio_irq_unmask(struct irq_data *data)
 
 static void owl_gpio_irq_ack(struct irq_data *data)
 {
-	struct owl_pinctrl *pctrl = irq_data_get_irq_chip_data(data);
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(data);
+	struct owl_pinctrl *pctrl = gpiochip_get_data(gc);
 	const struct owl_gpio_port *port;
 	void __iomem *gpio_base;
 	unsigned long flags;
@@ -789,20 +787,27 @@ static void owl_gpio_irq_ack(struct irq_data *data)
 
 static int owl_gpio_irq_set_type(struct irq_data *data, unsigned int type)
 {
-	struct owl_pinctrl *pctrl = irq_data_get_irq_chip_data(data);
+	pr_info("%s: %d\n", __func__, __LINE__);
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(data);
+	struct owl_pinctrl *pctrl = gpiochip_get_data(gc);
 	const struct owl_gpio_port *port;
 	void __iomem *gpio_base;
 	unsigned long flags;
+	pr_info("%s: %d\n", __func__, __LINE__);
 	unsigned int gpio = data->hwirq;
 	unsigned int offset, value, irq_type = 0;
 
+	pr_info("%s: %d: IRQ: %d\n", __func__, __LINE__, gpio);
 	port = owl_gpio_get_port(pctrl, &gpio);
 	if (WARN_ON(port == NULL))
 		return -ENODEV;
 
+	pr_info("%s: %d\n", __func__, __LINE__);
 	gpio_base = pctrl->base + port->offset;
 
+	pr_info("%s: %d\n", __func__, __LINE__);
 	switch (type) {
+	case IRQ_TYPE_EDGE_BOTH:
 	case IRQ_TYPE_EDGE_RISING:
 		irq_type = OWL_GPIO_INT_EDGE_RISING;
 		break;
@@ -825,7 +830,7 @@ static int owl_gpio_irq_set_type(struct irq_data *data, unsigned int type)
 
 	raw_spin_lock_irqsave(&pctrl->lock, flags);
 
-	offset = gpio < 16 ? 4 : 0;
+	offset = (gpio < 16) ? 4 : 0;
 	value = readl_relaxed(gpio_base + port->intc_type + offset);
 	value &= ~(OWL_GPIO_INT_MASK << ((gpio % 16) * 2));
 	value |= irq_type << ((gpio % 16) * 2);
@@ -843,8 +848,11 @@ static int owl_gpio_irq_set_type(struct irq_data *data, unsigned int type)
 
 static void owl_gpio_irq_handler(struct irq_desc *desc)
 {
+	pr_info("%s: %d\n", __func__, __LINE__);
 	struct owl_pinctrl *pctrl = irq_desc_get_handler_data(desc);
 	struct irq_chip *chip = irq_desc_get_chip(desc);
+	struct irq_domain *domain = pctrl->chip.irq.domain;
+	unsigned int parent = irq_desc_get_irq(desc);
 	const struct owl_gpio_port *port;
 	void __iomem *base;
 	unsigned int pin, irq, offset = 0, i;
@@ -855,71 +863,96 @@ static void owl_gpio_irq_handler(struct irq_desc *desc)
 	for (i = 0; i < pctrl->soc->nports; i++) {
 		port = &pctrl->soc->ports[i];
 		base = pctrl->base + port->offset;
+
+		/* skip ports that are not associated with this irq */
+		if (parent != pctrl->irq[i])
+			goto skip;
+
 		pending_irq = readl_relaxed(base + port->intc_pd);
 
 		for_each_set_bit(pin, &pending_irq, port->pins) {
-			irq = irq_find_mapping(pctrl->domain, offset + pin);
+			irq = irq_find_mapping(domain, offset + pin);
 			generic_handle_irq(irq);
 
 			/* clear pending interrupt */
 			owl_gpio_update_reg(base + port->intc_pd, pin, true);
 		}
 
+skip:
 		offset += port->pins;
 	}
 
 	chained_irq_exit(chip, desc);
 }
 
-static struct irq_chip owl_gpio_irq_chip = {
-	.name           = "owlgpio",
-	.irq_mask       = owl_gpio_irq_mask,
-	.irq_unmask     = owl_gpio_irq_unmask,
-	.irq_ack        = owl_gpio_irq_ack,
-	.irq_set_type   = owl_gpio_irq_set_type,
+static int owl_gpio_irq_domain_xlate(struct irq_domain *domain,
+                                          struct device_node *np,
+                                          const u32 *spec, unsigned int size,
+                                          unsigned long *hwirq,
+                                          unsigned int *type)
+{
+        struct owl_pinctrl *pctrl = gpiochip_get_data(domain->host_data);
+
+	pr_info("%s: Spec: %d Hwirq: %d\n", __func__, *spec, *hwirq);
+
+	return 0;
+}
+
+
+static const struct irq_domain_ops owl_gpio_irq_domain_ops = {
+	.map = gpiochip_irq_map,
+	.unmap = gpiochip_irq_unmap,
+	.xlate = owl_gpio_irq_domain_xlate,
 };
 
 static int owl_gpio_init(struct owl_pinctrl *pctrl)
 {
 	struct gpio_chip *chip;
-	int irqno, ret, i;
+	struct gpio_irq_chip *gpio_irq;
+	int ret, i, j, offset;
 
 	chip = &pctrl->chip;
 	chip->base = -1;
 	chip->ngpio = pctrl->soc->ngpios;
 	chip->label = dev_name(pctrl->dev);
 	chip->parent = pctrl->dev;
-	chip->to_irq = owl_gpio_to_irq;
 	chip->owner = THIS_MODULE;
 	chip->of_node = pctrl->dev->of_node;
+
+	pctrl->irq_chip.name = chip->of_node->name;
+	pctrl->irq_chip.irq_ack = owl_gpio_irq_ack;
+	pctrl->irq_chip.irq_mask = owl_gpio_irq_mask;
+	pctrl->irq_chip.irq_unmask = owl_gpio_irq_unmask;
+	pctrl->irq_chip.irq_set_type = owl_gpio_irq_set_type;
+
+	gpio_irq = &chip->irq;
+	gpio_irq->chip = &pctrl->irq_chip;
+	gpio_irq->domain_ops = &owl_gpio_irq_domain_ops;
+	gpio_irq->handler = handle_simple_irq;
+	gpio_irq->default_type = IRQ_TYPE_NONE;
+	gpio_irq->parent_handler = owl_gpio_irq_handler;
+	gpio_irq->parent_handler_data = pctrl;
+	gpio_irq->num_parents = pctrl->num_irq;
+	gpio_irq->parents = pctrl->irq;
+
+	gpio_irq->map = devm_kcalloc(pctrl->dev, chip->ngpio,
+				sizeof(*gpio_irq->map), GFP_KERNEL);
+	if (!gpio_irq->map)
+		return -ENOMEM;
+
+	for (i = 0, offset = 0; i < pctrl->soc->nports; i++) {
+		const struct owl_gpio_port *port = &pctrl->soc->ports[i];
+
+		for (j = 0; j < port->pins; j++)
+			gpio_irq->map[offset + j] = gpio_irq->parents[i];
+
+		offset += port->pins;
+	}
 
 	ret = gpiochip_add_data(&pctrl->chip, pctrl);
 	if (ret) {
 		dev_err(pctrl->dev, "failed to register gpiochip\n");
 		return ret;
-	}
-
-	pctrl->domain = irq_domain_add_linear(chip->of_node,
-					     chip->ngpio,
-					     &irq_domain_simple_ops,
-					     NULL);
-	if (!pctrl->domain) {
-		dev_err(pctrl->dev, "Couldn't register IRQ domain\n");
-		gpiochip_remove(&pctrl->chip);
-		return -ENOMEM;
-	}
-
-	for (i = 0; i < chip->ngpio; i++) {
-		irqno = irq_create_mapping(pctrl->domain, i);
-		irq_set_chip_and_handler(irqno, &owl_gpio_irq_chip,
-					 handle_edge_irq);
-		irq_set_chip_data(irqno, pctrl);
-	}
-
-	for (i = 0; i < pctrl->soc->nports; i++) {
-		irq_set_chained_handler_and_data(pctrl->irq[i],
-						owl_gpio_irq_handler,
-						pctrl);
 	}
 
 	return 0;
@@ -978,14 +1011,20 @@ int owl_pinctrl_probe(struct platform_device *pdev,
 		goto err_exit;
 	}
 
-	pctrl->irq = devm_kcalloc(&pdev->dev, pctrl->soc->nports,
-				  sizeof(*pctrl->irq), GFP_KERNEL);
+	ret = platform_irq_count(pdev);
+	if (ret < 0)
+		goto err_exit;;
+
+	pctrl->num_irq = ret;
+
+	pctrl->irq = devm_kcalloc(&pdev->dev, pctrl->num_irq,
+					sizeof(*pctrl->irq), GFP_KERNEL);
 	if (!pctrl->irq) {
 		ret = -ENOMEM;
 		goto err_exit;
 	}
 
-	for (i = 0; i < pctrl->soc->nports ; i++) {
+	for (i = 0; i < pctrl->num_irq ; i++) {
 		pctrl->irq[i] = platform_get_irq(pdev, i);
 		if (pctrl->irq[i] < 0) {
 			ret = pctrl->irq[i];
