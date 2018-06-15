@@ -381,6 +381,11 @@ config SND_SOC_ADAV803
 config SND_SOC_ADS117X
 	tristate
 
+config SND_SOC_ADV7626
+	tristate "Analog Devices ADV7626 CODEC"
+	depends on I2C
+	select REGMAP_I2C
+
 config SND_SOC_AK4104
 	tristate "AKM AK4104 CODEC"
 	depends on SPI_MASTER
