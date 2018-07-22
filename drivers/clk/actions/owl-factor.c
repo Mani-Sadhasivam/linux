@@ -58,17 +58,16 @@ static unsigned int _get_table_val(const struct clk_factor_table *table,
 		}
 	}
 
-	if (val == -1)
+	if (val == -1) {
 		val = _get_table_maxval(table);
-
+	}
 	return val;
 }
 
-static int clk_val_best(struct clk_hw *hw, unsigned long rate,
+static int clk_val_best(const struct owl_factor_hw *factor_hw,
+			struct clk_hw *hw, unsigned long rate,
 			unsigned long *best_parent_rate)
 {
-	struct owl_factor *factor = hw_to_owl_factor(hw);
-	struct owl_factor_hw *factor_hw = &factor->factor_hw;
 	const struct clk_factor_table *clkt = factor_hw->table;
 	unsigned long parent_rate, try_parent_rate, best = 0, cur_rate;
 	unsigned long parent_rate_saved = *best_parent_rate;
@@ -87,9 +86,6 @@ static int clk_val_best(struct clk_hw *hw, unsigned long rate,
 		try_parent_rate = rate * clkt->div / clkt->mul;
 
 		if (try_parent_rate == parent_rate_saved) {
-			pr_debug("%s: [%d %d %d] found try_parent_rate %ld\n",
-				__func__, clkt->val, clkt->mul, clkt->div,
-				try_parent_rate);
 			/*
 			 * It's the most ideal case if the requested rate can be
 			 * divided from parent clock without any need to change
@@ -126,7 +122,7 @@ long owl_factor_helper_round_rate(struct owl_clk_common *common,
 	const struct clk_factor_table *clkt = factor_hw->table;
 	unsigned int val, mul = 0, div = 1;
 
-	val = clk_val_best(&common->hw, rate, parent_rate);
+	val = clk_val_best(factor_hw, &common->hw, rate, parent_rate);
 	_get_table_div_mul(clkt, val, &mul, &div);
 
 	return *parent_rate * mul / div;
