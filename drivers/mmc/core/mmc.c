@@ -2207,14 +2207,17 @@ int mmc_attach_mmc(struct mmc_host *host)
 	if (!mmc_host_is_spi(host))
 		mmc_set_bus_mode(host, MMC_BUSMODE_OPENDRAIN);
 
+	pr_info("%s: %d\n", __func__, __LINE__);
 	err = mmc_send_op_cond(host, 0, &ocr);
 	if (err)
 		return err;
 
+	pr_info("%s: %d\n", __func__, __LINE__);
 	mmc_attach_bus(host, &mmc_ops);
 	if (host->ocr_avail_mmc)
 		host->ocr_avail = host->ocr_avail_mmc;
 
+	pr_info("%s: %d\n", __func__, __LINE__);
 	/*
 	 * We need to get OCR a different way for SPI.
 	 */
@@ -2225,7 +2228,7 @@ int mmc_attach_mmc(struct mmc_host *host)
 	}
 
 	rocr = mmc_select_voltage(host, ocr);
-
+	pr_info("%s: %d\n", __func__, __LINE__);
 	/*
 	 * Can we support the voltage of the card?
 	 */
@@ -2237,15 +2240,18 @@ int mmc_attach_mmc(struct mmc_host *host)
 	/*
 	 * Detect and init the card.
 	 */
+	pr_info("%s: %d\n", __func__, __LINE__);
 	err = mmc_init_card(host, rocr, NULL);
 	if (err)
 		goto err;
 
+	pr_info("%s: %d\n", __func__, __LINE__);
 	mmc_release_host(host);
 	err = mmc_add_card(host->card);
 	if (err)
 		goto remove_card;
 
+	pr_info("%s: %d\n", __func__, __LINE__);
 	mmc_claim_host(host);
 	return 0;
 

@@ -263,6 +263,19 @@
 				     <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 40 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 16 IRQ_TYPE_LEVEL_HIGH>;
+			mmc_default: mmc_default {
+				pinmux {
+					groups = "nand0_d0_ceb3_mfp";
+					function = "sd2";
+				};
+				pinconf {
+					pins = "nand0_d0", "nand0_d1", "nand0_d2",
+						"nand0_d3", "nand0_d4", "nand0_d5",
+						"nand0_d6", "nand0_d7", "nand0_dqs",
+						"nand0_dqsn";
+					bias-pull-up;
+				};
+			};		
 		};
 
 		timer: timer@e0228000 {
@@ -283,6 +296,20 @@
 			dma-channels = <12>;
 			dma-requests = <46>;
 			clocks = <&cmu CLK_DMAC>;
+		};
+
+		mmc0: mmc@e0338000 {
+			compatible = "actions,s900-mmc";
+			reg = <0x0 0xe0338000 0x0 0x4000>;
+			interrupts = <GIC_SPI 44 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cmu CLK_SD2>;
+			clock-names = "mmc";
+			resets = <&cmu RESET_SD2>;
+			reset-names = "mmc";
+			dmas = <&dma 4>;
+			dma-names = "mmc";
+			pinctrl-0 = <&mmc_default>;
+			pinctrl-names = "pinctrl_mmc";
 		};
 	};
 };

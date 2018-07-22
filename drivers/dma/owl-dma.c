@@ -447,6 +447,12 @@ static struct owl_dma_pchan *owl_dma_get_pchan(struct owl_dma *od,
 		spin_unlock_irqrestore(&pchan->lock, flags);
 	}
 
+	if (i == od->nr_pchans) {
+		/* No physical channel available, cope with it */
+		dev_dbg(od->dma.dev, "no physical channel available");
+		return NULL;
+	}
+
 	return pchan;
 }
 
