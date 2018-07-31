@@ -8,20 +8,13 @@
 // Copyright (c) 2018 Linaro Ltd.
 // Author: Manivannan Sadhasivam <manivannan.sadhasivam@linaro.org>
 
+#include <linux/mfd/syscon.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 
 #include "owl-common.h"
-
-static const struct regmap_config owl_regmap_config = {
-	.reg_bits	= 32,
-	.reg_stride	= 4,
-	.val_bits	= 32,
-	.max_register	= 0x00cc,
-	.fast_io	= true,
-};
 
 static void owl_clk_set_regmap(const struct owl_clk_desc *desc,
 			 struct regmap *regmap)
@@ -41,18 +34,11 @@ static void owl_clk_set_regmap(const struct owl_clk_desc *desc,
 int owl_clk_regmap_init(struct platform_device *pdev,
 			 const struct owl_clk_desc *desc)
 {
-	void __iomem *base;
 	struct regmap *regmap;
-	struct resource *res;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(base))
-		return PTR_ERR(base);
-
-	regmap = devm_regmap_init_mmio(&pdev->dev, base, &owl_regmap_config);
+	regmap = syscon_node_to_regmap(of_get_parent(pdev->dev.of_node));
 	if (IS_ERR(regmap)) {
-		pr_err("failed to init regmap\n");
+		dev_err(&pdev->dev, "failed to get regmap\n");
 		return PTR_ERR(regmap);
 	}
 
