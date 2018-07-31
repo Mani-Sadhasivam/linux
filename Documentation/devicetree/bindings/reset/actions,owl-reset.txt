@@ -1,0 +1,33 @@
+Actions Semi Owl SoCs Reset Management Unit (RMU)
+=================================================
+
+Please also refer to reset.txt in this directory for common reset
+controller binding usage.
+
+The RMU registers are part of the system-controller block on Owl SoCs.
+
+Required properties:
+- compatible: Should be "actions,s900-rmu"
+- #reset-cells: Should be 1
+
+All available resets are defined as preprocessor macros in corresponding
+dt-bindings/reset/actions,s900-rmu.h header and can be used in device
+tree sources.
+
+Parent node should have the following properties :
+- compatible: "syscon", "simple-mfd"
+- reg: physical base address of the system controller and length of
+  memory mapped region.
+
+Example:
+
+        sysctrl: system-controller@e0160000 {
+                compatible = "syscon", "simple-mfd";
+                reg = <0x0 0xe0160000 0x0 0x1000>;
+
+                rmu: reset-controller {
+                        compatible = "actions,s900-rmu";
+                        #reset-cells = <1>;
+                };
+        };
+

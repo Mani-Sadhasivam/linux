@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: (GPL-2.0-or-later OR MIT)
+//
+// Device Tree binding constants for Actions Semi S900 Reset Management Unit
+//
+// Copyright (c) 2018 Linaro Ltd.
+
+#ifndef _DT_BINDINGS_ACTIONS_S900_RESET_H
+#define _DT_BINDINGS_ACTIONS_S900_RESET_H
+
+#define S900_RESET_CHIPID		0
+#define S900_RESET_CPU_SCNT		1
+#define S900_RESET_SRAMI		2
+#define S900_RESET_DDR_CTL_PHY		3
+#define S900_RESET_DMAC			4
+#define S900_RESET_GPIO			5
+#define S900_RESET_BISP_AXI		6
+#define S900_RESET_CSI0			7
+#define S900_RESET_CSI1			8
+#define S900_RESET_DE			9
+#define S900_RESET_DSI			10
+#define S900_RESET_GPU3D_PA		11
+#define S900_RESET_GPU3D_PB		12
+#define S900_RESET_HDE			13
+#define S900_RESET_I2C0			14
+#define S900_RESET_I2C1			15
+#define S900_RESET_I2C2			16
+#define S900_RESET_I2C3			17
+#define S900_RESET_I2C4			18
+#define S900_RESET_I2C5			19
+#define S900_RESET_IMX			20
+#define S900_RESET_NANDC0		21
+#define S900_RESET_NANDC1		22
+#define S900_RESET_SD0			23
+#define S900_RESET_SD1			24
+#define S900_RESET_SD2			25
+#define S900_RESET_SD3			26
+#define S900_RESET_SPI0			27
+#define S900_RESET_SPI1			28
+#define S900_RESET_SPI2			29
+#define S900_RESET_SPI3			30
+#define S900_RESET_UART0		31
+#define S900_RESET_UART1		32
+#define S900_RESET_UART2		33
+#define S900_RESET_UART3		34
+#define S900_RESET_UART4		35
+#define S900_RESET_UART5		36
+#define S900_RESET_UART6		37
+#define S900_RESET_HDMI			38
+#define S900_RESET_LVDS			39
+#define S900_RESET_EDP			40
+#define S900_RESET_USB2HUB		41
+#define S900_RESET_USB2HSIC		42
+#define S900_RESET_USB3			43
+#define S900_RESET_PCM1			44
+#define S900_RESET_AUDIO		45
+#define S900_RESET_PCM0			46
+#define S900_RESET_SE			47
+#define S900_RESET_GIC			48
+#define S900_RESET_DDR_CTL_PHY_AXI	49
+#define S900_RESET_CMU_DDR		50
+#define S900_RESET_DMM			51
+#define S900_RESET_HDCP2TX		52
+#define S900_RESET_ETHERNET		53
+
+#endif /* _DT_BINDINGS_ACTIONS_S900_RESET_H */
