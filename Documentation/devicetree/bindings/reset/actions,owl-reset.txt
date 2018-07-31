@@ -7,12 +7,14 @@ controller binding usage.
 The RMU registers are part of the system-controller block on Owl SoCs.
 
 Required properties:
-- compatible: Should be "actions,s900-rmu"
+- compatible: Should be one of the following,
+       "actions,s900-rmu"
+       "actions,s700-rmu"
 - #reset-cells: Should be 1
 
 All available resets are defined as preprocessor macros in corresponding
-dt-bindings/reset/actions,s900-rmu.h header and can be used in device
-tree sources.
+dt-bindings/reset/actions,s900-rmu.h or actions,s700-rmu.h header and can
+be used in device tree sources.
 
 Parent node should have the following properties :
 - compatible: "syscon", "simple-mfd"
