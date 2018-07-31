@@ -5,6 +5,7 @@
 
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/clock/actions,s700-cmu.h>
+#include <dt-bindings/reset/actions,s700-rmu.h>
 
 / {
 	compatible = "actions,s700";
@@ -168,6 +169,11 @@
 				compatible = "actions,s700-cmu";
 				clocks = <&hosc>, <&losc>;
 				#clock-cells = <1>;
+			};
+
+			rmu: reset-controller {
+				compatible = "actions,s700-rmu";
+				#reset-cells = <1>;
 			};
 		};
 
