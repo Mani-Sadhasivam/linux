@@ -73,6 +73,12 @@ config RESET_MESON
 	help
 	  This enables the reset driver for Amlogic Meson SoCs.
 
+config RESET_OWL
+	bool "Actions Semi Owl SoCs Reset Driver" if COMPILE_TEST
+	default ARCH_ACTIONS
+	help
+	  This enables the reset controller driver for Actions Semi Owl SoCs.
+
 config RESET_OXNAS
 	bool
 
