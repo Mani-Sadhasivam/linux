@@ -156,6 +156,8 @@
 			compatible = "actions,s900-uart", "actions,owl-uart";
 			reg = <0x0 0xe012a000 0x0 0x2000>;
 			interrupts = <GIC_SPI 34 IRQ_TYPE_LEVEL_HIGH>;
+			dma-names = "tx";
+			dmas = <&dma 26>;
 			status = "disabled";
 		};
 
