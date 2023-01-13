@@ -421,6 +421,18 @@ static void dw_pcie_ep_stop(struct pci_epc *epc)
 	dw_pcie_stop_link(pci);
 }
 
+static u64 dw_pcie_ep_align_mem(struct pci_epc *epc, u64 addr, size_t *size)
+{
+	struct dw_pcie_ep *ep = epc_get_drvdata(epc);
+	struct dw_pcie *pci = to_dw_pcie_from_ep(ep);
+	u64 aaddr;
+
+	aaddr = ALIGN_DOWN(addr, pci->region_align);
+	*size += addr - aaddr;
+
+	return aaddr;
+}
+
 static int dw_pcie_ep_start(struct pci_epc *epc)
 {
 	struct dw_pcie_ep *ep = epc_get_drvdata(epc);
@@ -451,6 +463,7 @@ static const struct pci_epc_ops epc_ops = {
 	.set_msix		= dw_pcie_ep_set_msix,
 	.get_msix		= dw_pcie_ep_get_msix,
 	.raise_irq		= dw_pcie_ep_raise_irq,
+	.align_mem		= dw_pcie_ep_align_mem,
 	.start			= dw_pcie_ep_start,
 	.stop			= dw_pcie_ep_stop,
 	.get_features		= dw_pcie_ep_get_features,
