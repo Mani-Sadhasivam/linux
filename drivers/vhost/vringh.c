@@ -5,6 +5,7 @@
  * Since these may be in userspace, we use (inline) accessors.
  */
 #include <linux/compiler.h>
+#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/vringh.h>
 #include <linux/virtio_ring.h>
@@ -1613,6 +1614,209 @@ int vringh_need_notify_iotlb(struct vringh *vrh)
 EXPORT_SYMBOL(vringh_need_notify_iotlb);
 
 #endif
+
+static inline int getu16_iomem(const struct vringh *vrh, u16 *val,
+			       const __virtio16 *p)
+{
+	*val = vringh16_to_cpu(vrh, ioread16(p));
+	return 0;
+}
+
+static inline int putu16_iomem(const struct vringh *vrh, __virtio16 *p, u16 val)
+{
+	iowrite16(cpu_to_vringh16(vrh, val), p);
+	return 0;
+}
+
+static inline int copydesc_iomem(const struct vringh *vrh, void *dst,
+				 const void *src, size_t len)
+{
+	memcpy_fromio(dst, src, len);
+	return 0;
+}
+
+static int putused_iomem(const struct vringh *vrh, struct vring_used_elem *dst,
+			 const struct vring_used_elem *src, unsigned int num)
+{
+	memcpy_toio(dst, src, num * sizeof(*dst));
+	return 0;
+}
+
+static inline int xfer_from_iomem(const struct vringh *vrh, void *src,
+				  void *dst, size_t len)
+{
+	memcpy_fromio(dst, src, len);
+	return 0;
+}
+
+static inline int xfer_to_iomem(const struct vringh *vrh, void *dst, void *src,
+				size_t len)
+{
+	memcpy_toio(dst, src, len);
+	return 0;
+}
+
+/**
+ * vringh_init_iomem - initialize a vringh for a vring on io-memory.
+ * @vrh: the vringh to initialize.
+ * @features: the feature bits for this ring.
+ * @num: the number of elements.
+ * @weak_barriers: true if we only need memory barriers, not I/O.
+ * @desc: the userspace descriptor pointer.
+ * @avail: the userspace avail pointer.
+ * @used: the userspace used pointer.
+ *
+ * Returns an error if num is invalid: you should check pointers
+ * yourself!
+ */
+int vringh_init_iomem(struct vringh *vrh, u64 features, unsigned int num,
+		      bool weak_barriers, struct vring_desc *desc,
+		      struct vring_avail *avail, struct vring_used *used)
+{
+	return vringh_init_kern(vrh, features, num, weak_barriers, desc, avail,
+				used);
+}
+EXPORT_SYMBOL(vringh_init_iomem);
+
+/**
+ * vringh_getdesc_iomem - get next available descriptor from vring on io-memory.
+ * @vrh: the vring on io-memory.
+ * @riov: where to put the readable descriptors (or NULL)
+ * @wiov: where to put the writable descriptors (or NULL)
+ * @head: head index we received, for passing to vringh_complete_iomem().
+ * @gfp: flags for allocating larger riov/wiov.
+ *
+ * Returns 0 if there was no descriptor, 1 if there was, or -errno.
+ *
+ * There some notes, and those are same with vringh_getdesc_kern(). Please see
+ * it.
+ */
+int vringh_getdesc_iomem(struct vringh *vrh, struct vringh_kiov *riov,
+			 struct vringh_kiov *wiov, u16 *head, gfp_t gfp)
+{
+	int err;
+
+	err = __vringh_get_head(vrh, getu16_iomem, &vrh->last_avail_idx);
+	if (err < 0)
+		return err;
+
+	/* Empty... */
+	if (err == vrh->vring.num)
+		return 0;
+
+	*head = err;
+	err = __vringh_iov(vrh, *head, riov, wiov, no_range_check, NULL, gfp,
+			   copydesc_iomem);
+	if (err)
+		return err;
+
+	return 1;
+}
+EXPORT_SYMBOL(vringh_getdesc_iomem);
+
+/**
+ * vringh_iov_pull_iomem - copy bytes from vring_iov.
+ * @vrh: the vring on io-memory.
+ * @riov: the riov as passed to vringh_getdesc_iomem() (updated as we consume)
+ * @dst: the place to copy.
+ * @len: the maximum length to copy.
+ *
+ * Returns the bytes copied <= len or a negative errno.
+ */
+ssize_t vringh_iov_pull_iomem(struct vringh *vrh, struct vringh_kiov *riov,
+			      void *dst, size_t len)
+{
+	return vringh_iov_xfer(vrh, riov, dst, len, xfer_from_iomem);
+}
+EXPORT_SYMBOL(vringh_iov_pull_iomem);
+
+/**
+ * vringh_iov_push_iomem - copy bytes into vring_iov.
+ * @vrh: the vring on io-memory.
+ * @wiov: the wiov as passed to vringh_getdesc_iomem() (updated as we consume)
+ * @src: the place to copy from.
+ * @len: the maximum length to copy.
+ *
+ * Returns the bytes copied <= len or a negative errno.
+ */
+ssize_t vringh_iov_push_iomem(struct vringh *vrh, struct vringh_kiov *wiov,
+			      const void *src, size_t len)
+{
+	return vringh_iov_xfer(vrh, wiov, (void *)src, len, xfer_to_iomem);
+}
+EXPORT_SYMBOL(vringh_iov_push_iomem);
+
+/**
+ * vringh_abandon_iomem - we've decided not to handle the descriptor(s).
+ * @vrh: the vring on io-memory.
+ * @num: the number of descriptors to put back (ie. num
+ *	 vringh_getdesc_iomem() to undo).
+ *
+ * The next vringh_get_kern() will return the old descriptor(s) again.
+ */
+void vringh_abandon_iomem(struct vringh *vrh, unsigned int num)
+{
+	vringh_abandon_kern(vrh, num);
+}
+EXPORT_SYMBOL(vringh_abandon_iomem);
+
+/**
+ * vringh_complete_iomem - we've finished with descriptor, publish it.
+ * @vrh: the vring on io-memory.
+ * @head: the head as filled in by vringh_getdesc_iomem().
+ * @len: the length of data we have written.
+ *
+ * You should check vringh_need_notify_iomem() after one or more calls
+ * to this function.
+ */
+int vringh_complete_iomem(struct vringh *vrh, u16 head, u32 len)
+{
+	struct vring_used_elem used;
+
+	used.id = cpu_to_vringh32(vrh, head);
+	used.len = cpu_to_vringh32(vrh, len);
+
+	return __vringh_complete(vrh, &used, 1, putu16_iomem, putused_iomem);
+}
+EXPORT_SYMBOL(vringh_complete_iomem);
+
+/**
+ * vringh_notify_enable_iomem - we want to know if something changes.
+ * @vrh: the vring on io-memory.
+ *
+ * This always enables notifications, but returns false if there are
+ * now more buffers available in the vring.
+ */
+bool vringh_notify_enable_iomem(struct vringh *vrh)
+{
+	return __vringh_notify_enable(vrh, getu16_iomem, putu16_iomem);
+}
+EXPORT_SYMBOL(vringh_notify_enable_iomem);
+
+/**
+ * vringh_notify_disable_iomem - don't tell us if something changes.
+ * @vrh: the vring on io-memory.
+ *
+ * This is our normal running state: we disable and then only enable when
+ * we're going to sleep.
+ */
+void vringh_notify_disable_iomem(struct vringh *vrh)
+{
+	__vringh_notify_disable(vrh, putu16_iomem);
+}
+EXPORT_SYMBOL(vringh_notify_disable_iomem);
+
+/**
+ * vringh_need_notify_iomem - must we tell the other side about used buffers?
+ * @vrh: the vring we've called vringh_complete_iomem() on.
+ *
+ * Returns -errno or 0 if we don't need to tell the other side, 1 if we do.
+ */
+int vringh_need_notify_iomem(struct vringh *vrh)
+{
+	return __vringh_need_notify(vrh, getu16_iomem);
+}
+EXPORT_SYMBOL(vringh_need_notify_iomem);
 
 MODULE_DESCRIPTION("host side of a virtio ring");
 MODULE_LICENSE("GPL");
