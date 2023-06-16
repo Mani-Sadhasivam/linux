@@ -417,6 +417,94 @@ int pci_epc_set_msix(struct pci_epc *epc, u8 func_no, u8 vfunc_no,
 EXPORT_SYMBOL_GPL(pci_epc_set_msix);
 
 /**
+ * pci_epc_unmap_aligned()
+ */
+void pci_epc_unmap_aligned(struct pci_epc *epc, u8 func_no, u8 vfunc_no,
+			   phys_addr_t phys_addr, void __iomem *virt_addr,
+			   size_t size)
+{
+	u64 aligned_phys;
+	void __iomem *aligned_virt;
+	size_t offset;
+
+	if (IS_ERR_OR_NULL(epc) || func_no >= epc->max_functions)
+		return;
+
+	if (vfunc_no > 0 && (!epc->max_vfs || vfunc_no > epc->max_vfs[func_no]))
+		return;
+
+	if (!epc->ops->unmap_addr)
+		return;
+
+	if (epc->ops->align_mem) {
+		mutex_lock(&epc->lock);
+		aligned_phys = epc->ops->align_mem(epc, phys_addr, &size);
+		mutex_unlock(&epc->lock);
+	} else {
+		aligned_phys = phys_addr;
+	}
+
+	offset = phys_addr - aligned_phys;
+	aligned_virt = virt_addr - offset;
+
+	mutex_lock(&epc->lock);
+	epc->ops->unmap_addr(epc, func_no, vfunc_no, aligned_phys);
+	mutex_unlock(&epc->lock);
+
+	pci_epc_mem_free_addr(epc, aligned_phys, aligned_virt, size);
+}
+EXPORT_SYMBOL_GPL(pci_epc_unmap_aligned);
+
+/**
+ * pci_epc_map_aligned() - map 
+ *
+ */
+void __iomem *pci_epc_map_aligned(struct pci_epc *epc, u8 func_no, u8 vfunc_no,
+				  u64 pci_addr, phys_addr_t *phys_addr,
+				  size_t size)
+{
+	int ret;
+	u64 aligned_addr;
+	size_t offset;
+	void __iomem *virt_addr;
+
+	if (IS_ERR_OR_NULL(epc) || func_no >= epc->max_functions)
+		return ERR_PTR(-EINVAL);
+
+	if (vfunc_no > 0 && (!epc->max_vfs || vfunc_no > epc->max_vfs[func_no]))
+		return ERR_PTR(-EINVAL);
+
+	if (!epc->ops->map_addr)
+		return ERR_PTR(-ENOTSUPP);
+
+	if (epc->ops->align_mem) {
+		mutex_lock(&epc->lock);
+		aligned_addr = epc->ops->align_mem(epc, pci_addr, &size);
+		mutex_unlock(&epc->lock);
+	} else {
+		aligned_addr = pci_addr;
+	}
+
+	offset = pci_addr - aligned_addr;
+
+	virt_addr = pci_epc_mem_alloc_addr(epc, phys_addr, size);
+	if (!virt_addr)
+		return ERR_PTR(-ENOMEM);
+
+	mutex_lock(&epc->lock);
+	ret = epc->ops->map_addr(epc, func_no, vfunc_no, *phys_addr,
+				 aligned_addr, size);
+	mutex_unlock(&epc->lock);
+	if (ret)
+		return ERR_PTR(ret);
+
+	*phys_addr += offset;
+
+	return virt_addr + offset;
+}
+EXPORT_SYMBOL_GPL(pci_epc_map_aligned);
+
+/**
  * pci_epc_unmap_addr() - unmap CPU address from PCI address
  * @epc: the EPC device on which address is allocated
  * @func_no: the physical endpoint function number in the EPC device
