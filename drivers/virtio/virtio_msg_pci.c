@@ -57,36 +57,6 @@ static irqreturn_t config_interrupt(int irq, void *opaque)
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t vring_common_interrupt(int irq, void *opaque)
-{
-	struct virtio_msg_pci_device *vmp_dev = opaque;
-	struct virtio_msg_vq *info;
-	struct virtio_msg msg;
-	bool handled = false;
-
-	/* We don't have any msg here, lets create one to make it work */
-	memset(&msg, 0, sizeof(msg));
-	msg.id = VIRTIO_MSG_EVENT_USED;
-	msg.event_used.index = 0;
-
-	/* Call the interrupt handler for each virtqueue */
-	list_for_each_entry(info, &vmp_dev->vmdev.virtqueues, node) {
-		if (!virtio_msg_receive(&vmp_dev->vmdev, &msg)) {
-			handled = true;
-			break;
-		}
-		msg.event_used.index++;
-	}
-
-	/* Interrupt should belong to one of the virtqueues at least */
-	if (!handled) {
-		pr_debug("%s: Failed to find virtqueue for message", __func__);
-		return IRQ_NONE;
-	}
-
-	return IRQ_HANDLED;
-}
-
 static int virtio_msg_pci_send(struct virtio_msg_device *vmdev,
 				struct virtio_msg *request,
 				struct virtio_msg *response)
@@ -164,26 +134,55 @@ static void virtio_msg_pci_release(struct virtio_msg_device *vmdev)
 	kfree(vmp_dev);
 }
 
-static int virtio_msg_pci_vqs_prepare(struct virtio_msg_device *vmdev)
+static int virtio_msg_pci_vqs_prepare(struct virtio_msg_device *vmdev, u32 nvqs)
 {
 	struct virtio_msg_pci_device *vmp_dev = to_virtio_msg_pci_device(vmdev);
 	int ret;
 
-	/* TODO: This should happen during vmsg_setup_vq() */
-	ret = request_irq(pci_irq_vector(vmp_dev->pci_dev, 0), config_interrupt, 0,
-				"virtio-msg-pci-config", vmp_dev);
-	if (ret)
+	/* TODO: Fallback to shared vector */
+	ret = pci_alloc_irq_vectors(vmp_dev->pci_dev, 1, nvqs, PCI_IRQ_MSI);
+	if (ret < 0) {
+		dev_err(&vmp_dev->pci_dev->dev, "Error allocating MSI vectors %d\n", ret);
 		return ret;
+	}
 
-	return request_irq(pci_irq_vector(vmp_dev->pci_dev, 1), vring_common_interrupt, 0,
-				"virtio-msg-pci-vring", vmp_dev);
+	return 0;
 }
+
+#define VIRTIO_MSG_NVQ 3 /* FIXME */
 
 static void virtio_msg_pci_vqs_release(struct virtio_msg_device *vmdev)
 {
 	struct virtio_msg_pci_device *vmp_dev = to_virtio_msg_pci_device(vmdev);
 
 	pci_free_irq(vmp_dev->pci_dev, 0, vmp_dev);
+}
+
+static int virtio_msg_alloc_vq_vector(struct virtio_msg_device *vmdev, struct virtqueue *vq,
+			       const char *name, u32 queue_idx)
+{
+	struct virtio_msg_pci_device *vmp_dev = to_virtio_msg_pci_device(vmdev);
+	char *vec_name;
+
+	vec_name = devm_kasprintf(&vmp_dev->pci_dev->dev, GFP_KERNEL, "%s: %d",
+			      name, queue_idx);
+	if (!vec_name)
+		return -ENOMEM;
+
+	if (queue_idx == VIRTIO_MSG_NVQ - 1)
+		return request_irq(pci_irq_vector(vmp_dev->pci_dev, queue_idx), config_interrupt, 0,
+					vec_name, vmp_dev);
+	else
+		return request_irq(pci_irq_vector(vmp_dev->pci_dev, queue_idx), vring_interrupt, 0,
+					vec_name, vq);
+}
+
+static void virtio_msg_free_vq_vector(struct virtio_msg_device *vmdev,
+				      struct virtqueue *vq, u32 queue_idx)
+{
+	struct virtio_msg_pci_device *vmp_dev = to_virtio_msg_pci_device(vmdev);
+
+	free_irq(pci_irq_vector(vmp_dev->pci_dev, queue_idx), vq);
 }
 
 static struct virtio_msg_ops vmp_ops = {
@@ -193,6 +192,8 @@ static struct virtio_msg_ops vmp_ops = {
 	.release = virtio_msg_pci_release,
 	.prepare_vqs = virtio_msg_pci_vqs_prepare,
 	.release_vqs = virtio_msg_pci_vqs_release,
+	.alloc_vq_vector = virtio_msg_alloc_vq_vector,
+	.free_vq_vector = virtio_msg_free_vq_vector,
 };
 
 /* FIXME: Using the Qcom's modem device id */
@@ -247,13 +248,6 @@ static int virtio_msg_pci_probe(struct pci_dev *pci_dev,
 	}
 
 	dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
-
-	/* FIXME: Use per queue MSIs */
-	ret = pci_alloc_irq_vectors(pci_dev, 1, 2, PCI_IRQ_MSI);
-	if (ret < 0) {
-		dev_err(dev, "Error allocating MSI vectors %d\n", ret);
-		goto err_free_vmp_dev;
-	}
 
 	return virtio_msg_register(&vmp_dev->vmdev);
 

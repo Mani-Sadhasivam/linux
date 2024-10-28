@@ -36,8 +36,12 @@ struct virtio_msg_ops {
 	const char *(*bus_name)(struct virtio_msg_device *vmdev);
 	void (*synchronize_cbs)(struct virtio_msg_device *vmdev);
 	void (*release)(struct virtio_msg_device *vmdev);
-	int (*prepare_vqs)(struct virtio_msg_device *vmdev);
+	int (*prepare_vqs)(struct virtio_msg_device *vmdev, u32 nvqs);
 	void (*release_vqs)(struct virtio_msg_device *vmdev);
+	int (*alloc_vq_vector)(struct virtio_msg_device *vmdev,
+			       struct virtqueue *vq, const char *name, u32 queue_idx);
+	void (*free_vq_vector)(struct virtio_msg_device *vmdev,
+			       struct virtqueue *vq, u32 queue_idx);
 };
 
 /**

@@ -333,9 +333,13 @@ static void vmsg_del_vqs(struct virtio_device *vdev)
 {
 	struct virtio_msg_device *vmdev = to_virtio_msg_device(vdev);
 	struct virtqueue *vq, *n;
+	u32 queue_idx = 0;
 
-	list_for_each_entry_safe(vq, n, &vmdev->vdev.vqs, list)
+	list_for_each_entry_safe(vq, n, &vmdev->vdev.vqs, list) {
 		vmsg_del_vq(vq);
+		if (vmdev->ops->free_vq_vector)
+			vmdev->ops->free_vq_vector(vmdev, vq, queue_idx++);
+	}
 
 	vmdev->ops->release_vqs(vmdev);
 }
@@ -424,11 +428,11 @@ static int vmsg_find_vqs(struct virtio_device *vdev, unsigned int nvqs,
 	struct virtio_msg_device *vmdev = to_virtio_msg_device(vdev);
 	int i, ret, queue_idx = 0;
 
-	ret = vmdev->ops->prepare_vqs(vmdev);
+	ret = vmdev->ops->prepare_vqs(vmdev, nvqs);
 	if (ret)
 		return ret;
 
-	for (i = 0; i < nvqs; ++i) {
+	for (i = 0; i < nvqs; ++i, ++queue_idx) {
 		struct virtqueue_info *vqi = &vqs_info[i];
 
 		if (!vqi->name) {
@@ -436,15 +440,25 @@ static int vmsg_find_vqs(struct virtio_device *vdev, unsigned int nvqs,
 			continue;
 		}
 
-		vqs[i] = vmsg_setup_vq(vmdev, queue_idx++, vqi->callback,
+		vqs[i] = vmsg_setup_vq(vmdev, queue_idx, vqi->callback,
 				     vqi->name, vqi->ctx);
 		if (IS_ERR(vqs[i])) {
-			vmsg_del_vqs(vdev);
-			return PTR_ERR(vqs[i]);
+			ret = PTR_ERR(vqs[i]);
+			goto err_del_vqs;
+		}
+
+		if (vmdev->ops->alloc_vq_vector) {
+			ret = vmdev->ops->alloc_vq_vector(vmdev, vqs[i], vqi->name, queue_idx);
+			if (ret)
+				goto err_del_vqs;
 		}
 	}
 
 	return 0;
+
+err_del_vqs:
+	vmsg_del_vqs(vdev);
+	return ret;
 }
 
 static const char *vmsg_bus_name(struct virtio_device *vdev)
