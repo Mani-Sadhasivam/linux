@@ -91,7 +91,7 @@ static void epf_vnet_ep_announce_linkup(struct epf_vnet *vnet)
 
 	/* MSI vector for config vq is fixed to 0 */
 	pci_epc_raise_irq(epf->epc, epf->func_no, epf->vfunc_no, PCI_IRQ_MSI,
-			  1);
+			  3);
 }
 
 static bool __epf_vnet_init_complete(struct epf_vnet *vnet)
@@ -139,7 +139,7 @@ static void epf_vnet_complete_xfer(struct epf_virtio *evio, void *priv)
 	struct epf_vnet_done_cb_param *cb_param = priv;
 	struct vringh *vrh = &vnet->vdev_vrhs[cb_param->local_vq_index];
 	struct virtqueue *vq = vnet->vdev_vqs[cb_param->local_vq_index];
-//	u16 msi_vec = evio->vrhs[cb_param->remote_vq_index]->msi_vec;
+	u16 msi_vec = evio->vrhs[cb_param->remote_vq_index]->msi_vec;
 	struct pci_epf *epf = evio->epf;
 
 
@@ -157,7 +157,7 @@ static void epf_vnet_complete_xfer(struct epf_virtio *evio, void *priv)
 	local_bh_enable();
 
 	pci_epc_raise_irq(epf->epc, epf->func_no, epf->vfunc_no, PCI_IRQ_MSI,
-			  2); /* FIXME: MSI */
+			  msi_vec + 1);
 
 	kfree(cb_param);
 }
