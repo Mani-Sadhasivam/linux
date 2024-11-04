@@ -26,8 +26,8 @@ struct epf_vq {
 #define VIRTIO_MSG_PCI_MSGS 64
 struct virtio_msg_pci_regs {
 	__le64 num_msgs;
-	__le64 driver_bitmap;
-	__le64 device_bitmap;
+	__le64 head;
+	__le64 tail;
 	
 	struct virtio_msg msgs[VIRTIO_MSG_PCI_MSGS];
 } ____cacheline_aligned;
@@ -51,7 +51,6 @@ struct epf_virtio {
 	struct task_struct *bgtask;
 
 	/* Virtual address of PCI configuration space */
-	void __iomem *notification;
 	struct virtio_msg_pci_regs *msg;
 
 	void (*qn_callback)(void *param, u32 index);
@@ -70,8 +69,8 @@ struct epf_virtio {
 	spinlock_t list_lock;
 	struct list_head completion_list;
 
-	u64 driver_bitmap ____cacheline_aligned;
-	u64 device_bitmap ____cacheline_aligned;
+	u64 cached_head ____cacheline_aligned;
+	u64 cached_tail ____cacheline_aligned;
 	u32 device_id;
 	u32 vendor_id;
 	u8 status;

@@ -463,8 +463,7 @@ int epf_virtio_init(struct epf_virtio *evio, struct pci_epf_header *hdr,
 		return PTR_ERR(bar);
 
 	//epf_virtio_init_bar(evio, bar);
-	evio->notification = bar;
-	evio->msg = bar + 0x1000;
+	evio->msg = bar;
 	evio->device_id = hdr->subsys_id;
 	evio->vendor_id = hdr->subsys_vendor_id;
 
@@ -492,7 +491,7 @@ int epf_virtio_init(struct epf_virtio *evio, struct pci_epf_header *hdr,
 err_free_vrhs:
 	kfree(evio->vrhs);
 err_free_bar:
-	epf_virtio_free_bar(evio->epf, evio->notification);
+	epf_virtio_free_bar(evio->epf, evio->msg);
 
 	return err;
 }
@@ -507,7 +506,7 @@ void epf_virtio_final(struct epf_virtio *evio)
 	flush_work(&evio->completion_work);
 	destroy_workqueue(evio->dma_wq);
 
-	epf_virtio_free_bar(evio->epf, evio->notification);
+	epf_virtio_free_bar(evio->epf, evio->msg);
 
 	for (int i = 0; i < evio->nvq; i++)
 		epf_virtio_free_vringh(evio->epf, evio->vrhs[i]);
@@ -825,7 +824,6 @@ static int epf_virtio_process_message(struct epf_virtio *evio, struct virtio_msg
 		request->get_device_status_resp.status = cpu_to_le32(evio->status);
 		break;
 	default:
-		/* TODO */
 		break;
 	}
 
@@ -835,52 +833,41 @@ static int epf_virtio_process_message(struct epf_virtio *evio, struct virtio_msg
 static int epf_virtio_bgtask(void *param)
 {
 	struct epf_virtio *evio = param;
-	u32 entry, val;
-	u64 msg_bitmap;
+	u64 val;
 	int ret;
 
 	while (1) {
-		readl_poll_timeout(evio->notification, val, val == 1, 0, 0);
-
+		readl_poll_timeout(&evio->msg->head, val, val != evio->cached_tail, 0, 0);
 		do {
 			struct virtio_msg request;
 
 			/* Update the driver bitmap */
-			evio->driver_bitmap = readq(&evio->msg->driver_bitmap);
-			msg_bitmap = evio->driver_bitmap ^ evio->device_bitmap;
-			entry = ffs(msg_bitmap);
-			if (!entry) {
-				pr_err("%s: No entry available\n", __func__);
-				continue; /* TODO */
-			}
-			entry--;
+			evio->cached_head = readq(&evio->msg->head);
 
 			/* Fetch the message */
-			memcpy_fromio(&request, &evio->msg->msgs[entry], sizeof(struct virtio_msg));
+			memcpy_fromio(&request, &evio->msg->msgs[evio->cached_tail], sizeof(struct virtio_msg));
 
 			ret = epf_virtio_process_message(evio, &request);
 			if (ret)
 				return ret;
 
-			if (request.type != VIRTIO_MSG_TYPE_RESPONSE) {
+			if (request.type == VIRTIO_MSG_TYPE_RESPONSE)
 				/* Send response in the same message */
-				memcpy_toio(&evio->msg->msgs[entry], &request, sizeof(struct virtio_msg));
-			}
+				memcpy_toio(&evio->msg->msgs[evio->cached_tail], &request, sizeof(struct virtio_msg));
 
 			/*
-			 * Ensure that the messages are read before updating the
+			 * Ensure that the messages are written before updating the
 			 * entry.
 			 */
-			dma_rmb();
+			dma_wmb();
 
 			/* Update the device bitmap */
-			evio->device_bitmap = evio->device_bitmap ^ BIT(entry);
-			writeq(evio->device_bitmap, &evio->msg->device_bitmap);
-	
-		} while(entry);
+			evio->cached_tail++;
+			if (evio->cached_tail == VIRTIO_MSG_PCI_MSGS)
+				evio->cached_tail = 0;
 
-		/* Clear notification */
-		writel(0, evio->notification);
+			writeq(evio->cached_tail, &evio->msg->tail);
+		} while(evio->cached_head != evio->cached_tail);
 	}
 
 	return 0;

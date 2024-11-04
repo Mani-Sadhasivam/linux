@@ -25,17 +25,16 @@ struct virtio_msg_pci_device {
 	struct virtio_msg_device vmdev;
 	struct pci_dev *pci_dev; /* Really needed? */
 
-	void __iomem *notification;
 	struct virtio_msg_pci_regs *msg;
 
-	u64 driver_bitmap ____cacheline_aligned;
-	u64 device_bitmap ____cacheline_aligned;
+	u64 cached_head ____cacheline_aligned;
+	u64 cached_tail ____cacheline_aligned;
 };
 
 struct virtio_msg_pci_regs {
 	__le64 num_msgs;
-	__le64 driver_bitmap;
-	__le64 device_bitmap;
+	__le64 head;
+	__le64 tail;
 	
 	struct virtio_msg msgs[VIRTIO_MSG_PCI_MSGS];
 } ____cacheline_aligned;
@@ -62,53 +61,50 @@ static int virtio_msg_pci_send(struct virtio_msg_device *vmdev,
 				struct virtio_msg *response)
 {
 	struct virtio_msg_pci_device *vmp_dev = to_virtio_msg_pci_device(vmdev);
-	u64 msg_bitmap;
-	u32 entry, val;
+	u64 next_head, val;
 
-	/* Update the device bitmap */
-	vmp_dev->device_bitmap = readq(&vmp_dev->msg->device_bitmap);
+	vmp_dev->cached_tail = readq(&vmp_dev->msg->tail);
 
-	/* Find a free entry */
-	msg_bitmap = vmp_dev->driver_bitmap ^ vmp_dev->device_bitmap;
-	entry = ffs(~msg_bitmap);
-	if (!entry) {
-		pr_err("%s: No entry available\n", __func__);
-		return -ENOENT; /* TODO */
+	/* Compute head */
+	next_head = vmp_dev->cached_head + 1;
+	if (next_head == 64) /* TODO */
+		next_head = 0;
+
+	if (next_head == vmp_dev->cached_tail) {
+		/* Load tail */
+		vmp_dev->cached_tail = readq(&vmp_dev->msg->tail);
+		if (next_head == vmp_dev->cached_tail) {
+			pci_err(vmp_dev->pci_dev, "No space available!\n");
+			return -ENOENT;
+		}
 	}
-	entry--;
 
 	/* Fill the message */
-	memcpy_toio(&vmp_dev->msg->msgs[entry],
+	memcpy_toio(&vmp_dev->msg->msgs[vmp_dev->cached_head],
 			request, sizeof(struct virtio_msg));
 
-	/* Update the driver bitmap */
-	vmp_dev->driver_bitmap = vmp_dev->driver_bitmap ^ BIT(entry);
-	writeq(vmp_dev->driver_bitmap, &vmp_dev->msg->driver_bitmap);
-	
-	/* Send notification */
-	writel(1, vmp_dev->notification);
+	/* Update head */
+	writeq(next_head, &vmp_dev->msg->head);
 
-	/* Poll for the response */
-	readl_poll_timeout(vmp_dev->notification, val, !val, 0, 0);
-
-	/* Update the device bitmap */
-	vmp_dev->device_bitmap = readq(&vmp_dev->msg->device_bitmap);
-
-	/* FIXME */
-	if (!response)
+	if (!response) {
+		vmp_dev->cached_head = next_head;
 		return 0;
-
-	msg_bitmap = vmp_dev->driver_bitmap ^ vmp_dev->device_bitmap;
-	entry = ffs(~msg_bitmap);
-	if (!entry) {
-		pr_err("%s: No entry available\n", __func__);
-		return -ENOENT; /* TODO */
 	}
-	entry--;
+
+	readl_poll_timeout(&vmp_dev->msg->tail, val, val == next_head, 0, 0);
 
 	/* Get the response */
-	memcpy_fromio(response, &vmp_dev->msg->msgs[entry],
+	memcpy_fromio(response, &vmp_dev->msg->msgs[vmp_dev->cached_head],
 			sizeof(struct virtio_msg));
+
+	vmp_dev->cached_head = next_head;
+
+	/* Check for matching response */
+	if (response->id == request->id && !(response->type &
+			VIRTIO_MSG_TYPE_RESPONSE)) {
+		pci_err(vmp_dev->pci_dev, "Response error!\n");
+		return -ENOENT; /* FIXME */
+	}
 
 	return 0;
 }
@@ -142,7 +138,7 @@ static int virtio_msg_pci_vqs_prepare(struct virtio_msg_device *vmdev, u32 nvqs)
 	/* TODO: Fallback to shared vector */
 	ret = pci_alloc_irq_vectors(vmp_dev->pci_dev, 1, nvqs, PCI_IRQ_MSI);
 	if (ret < 0) {
-		dev_err(&vmp_dev->pci_dev->dev, "Error allocating MSI vectors %d\n", ret);
+		pci_err(vmp_dev->pci_dev, "Error allocating MSI vectors %d\n", ret);
 		return ret;
 	}
 
@@ -229,19 +225,7 @@ static int virtio_msg_pci_probe(struct pci_dev *pci_dev,
 	if (ret)
 		goto err_free_vmp_dev;
 
-	/* 
-	 * All regions are in BAR0 with below offsets:
-	 *
-	 * 0x0 - Doorbell
-	 * 0x1000 - Msg
-	 */
-	vmp_dev->notification = pcim_iomap_range(pci_dev, 0, 0x0, SZ_4K);
-	if (IS_ERR(vmp_dev->notification)) {
-		ret = PTR_ERR(vmp_dev->notification);
-		goto err_free_vmp_dev;
-	}
-
-	vmp_dev->msg = pcim_iomap_range(pci_dev, 0, 0x1000, SZ_4K);
+	vmp_dev->msg = pcim_iomap_range(pci_dev, 0, 0x0, SZ_4K);
 	if (IS_ERR(vmp_dev->msg)) {
 		ret = PTR_ERR(vmp_dev->msg);
 		goto err_free_vmp_dev;
