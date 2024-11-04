@@ -27,22 +27,27 @@
 #define U24_MAX				((1 << 24) - 1)
 #define to_virtio_msg_device(_dev)	container_of(_dev, struct virtio_msg_device, vdev)
 
-static void virtio_msg_prepare(struct virtio_msg *msg, bool request, u8 msg_id,
+static void virtio_msg_prepare(struct virtio_msg *msg, bool resp, u8 msg_id,
 			       u16 dev_id)
 {
 	/* Initialize all fields (including padding) to 0 */
 	memset(msg, 0, sizeof(*msg));
 
-	if (!request)
+	if (resp)
 		msg->type = VIRTIO_MSG_TYPE_RESPONSE;
 
 	msg->id = msg_id;
 	msg->dev_id = cpu_to_le16(dev_id);
 }
 
-static void virtio_request_prepare(struct virtio_msg *msg, u8 msg_id, u16 dev_id)
+static void virtio_request_prepare_resp(struct virtio_msg *msg, u8 msg_id, u16 dev_id)
 {
 	virtio_msg_prepare(msg, true, msg_id, dev_id);
+}
+
+static void virtio_request_prepare(struct virtio_msg *msg, u8 msg_id, u16 dev_id)
+{
+	virtio_msg_prepare(msg, false, msg_id, dev_id);
 }
 
 static int vmsg_get_device_info(struct virtio_msg_device *vmdev)
@@ -50,7 +55,7 @@ static int vmsg_get_device_info(struct virtio_msg_device *vmdev)
 	struct virtio_msg request, response;
 	int ret;
 
-	virtio_request_prepare(&request, VIRTIO_MSG_DEVICE_INFO, 0);
+	virtio_request_prepare_resp(&request, VIRTIO_MSG_DEVICE_INFO, 0);
 
 	ret = vmdev->ops->send(vmdev, &request, &response);
 	if (ret < 0)
@@ -77,7 +82,7 @@ static u64 vmsg_get_features(struct virtio_device *vdev)
 	struct virtio_msg request, response;
 	int ret;
 
-	virtio_request_prepare(&request, VIRTIO_MSG_GET_FEATURES, vmdev->vdev.id.device);
+	virtio_request_prepare_resp(&request, VIRTIO_MSG_GET_FEATURES, vmdev->vdev.id.device);
 	request.get_features.index = 0;
 
 	ret = vmdev->ops->send(vmdev, &request, &response);
@@ -119,7 +124,7 @@ static void vmsg_get(struct virtio_device *vdev, unsigned int offset,
 	BUG_ON(offset > U24_MAX);
 	BUG_ON(len > 8);
 
-	virtio_request_prepare(&request, VIRTIO_MSG_GET_CONFIG, vmdev->vdev.id.device);
+	virtio_request_prepare_resp(&request, VIRTIO_MSG_GET_CONFIG, vmdev->vdev.id.device);
 
 	offset = cpu_to_le32(offset);
 	request.get_config.offset[0] = (u8) offset;
@@ -173,7 +178,7 @@ static u32 vmsg_generation(struct virtio_device *vdev)
 	struct virtio_msg request, response;
 	int ret;
 
-	virtio_request_prepare(&request, VIRTIO_MSG_GET_CONFIG_GEN, vmdev->vdev.id.device);
+	virtio_request_prepare_resp(&request, VIRTIO_MSG_GET_CONFIG_GEN, vmdev->vdev.id.device);
 
 	ret = vmdev->ops->send(vmdev, &request, &response);
 	if (ret < 0) {
@@ -190,7 +195,7 @@ static u8 vmsg_get_status(struct virtio_device *vdev)
 	struct virtio_msg request, response;
 	int ret;
 
-	virtio_request_prepare(&request, VIRTIO_MSG_GET_DEVICE_STATUS, vmdev->vdev.id.device);
+	virtio_request_prepare_resp(&request, VIRTIO_MSG_GET_DEVICE_STATUS, vmdev->vdev.id.device);
 
 	ret = vmdev->ops->send(vmdev, &request, &response);
 	if (ret < 0) {
@@ -363,7 +368,7 @@ static struct virtqueue *vmsg_setup_vq(struct virtio_msg_device *vmdev,
 		notify = vmsg_notify;
 
 	/* Get virtqueue max size from device */
-	virtio_request_prepare(&request, VIRTIO_MSG_GET_VQUEUE, vmdev->vdev.id.device);
+	virtio_request_prepare_resp(&request, VIRTIO_MSG_GET_VQUEUE, vmdev->vdev.id.device);
 	request.get_vqueue.index = cpu_to_le32(index);
 
 	ret = vmdev->ops->send(vmdev, &request, &response);
@@ -391,7 +396,7 @@ static struct virtqueue *vmsg_setup_vq(struct virtio_msg_device *vmdev,
 	vq->num_max = num;
 
 	/* Send virtqueue configuration to the device */
-	virtio_request_prepare(&request, VIRTIO_MSG_SET_VQUEUE, vmdev->vdev.id.device);
+	virtio_request_prepare_resp(&request, VIRTIO_MSG_SET_VQUEUE, vmdev->vdev.id.device);
 	request.set_vqueue.index = cpu_to_le32(index);
 	request.set_vqueue.size = cpu_to_le64(virtqueue_get_vring_size(vq));
 	request.set_vqueue.descriptor_addr = cpu_to_le64(virtqueue_get_desc_addr(vq));
