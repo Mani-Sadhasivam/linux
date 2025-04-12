@@ -31,3 +31,13 @@ config HAVE_PWRCTL
 config PCI_PWRCTL_PWRSEQ
 	tristate
 	select PCI_PWRCTRL_PWRSEQ
+
+config PCI_PWRCTRL_TC9563
+	tristate "PCI Power Control driver for TC9563 PCIe switch"
+	select PCI_PWRCTRL
+	help
+	  Say Y here to enable the PCI Power Control driver of TC9563 PCIe
+	  switch.
+
+	  This driver enables power and configures the TC9563 PCIe switch
+	  through i2c.
