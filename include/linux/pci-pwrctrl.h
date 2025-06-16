@@ -38,6 +38,7 @@ struct device_link;
  */
 struct pci_pwrctrl {
 	struct device *dev;
+	struct gpio_desc *perst;
 
 	/* Private: don't use. */
 	struct notifier_block nb;
