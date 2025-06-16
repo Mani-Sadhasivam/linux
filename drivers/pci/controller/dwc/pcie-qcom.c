@@ -286,14 +286,6 @@ static void qcom_ep_reset_assert(struct qcom_pcie *pcie)
 	usleep_range(PERST_DELAY_US, PERST_DELAY_US + 500);
 }
 
-static void qcom_ep_reset_deassert(struct qcom_pcie *pcie)
-{
-	/* Ensure that PERST has been asserted for at least 100 ms */
-	msleep(PCIE_T_PVPERL_MS);
-	gpiod_set_value_cansleep(pcie->reset, 0);
-	usleep_range(PERST_DELAY_US, PERST_DELAY_US + 500);
-}
-
 static int qcom_pcie_start_link(struct dw_pcie *pci)
 {
 	struct qcom_pcie *pcie = to_qcom_pcie(pci);
@@ -1255,8 +1247,6 @@ static int qcom_pcie_host_init(struct dw_pcie_rp *pp)
 			goto err_disable_phy;
 	}
 
-	qcom_ep_reset_deassert(pcie);
-
 	if (pcie->cfg->ops->config_sid) {
 		ret = pcie->cfg->ops->config_sid(pcie);
 		if (ret)
@@ -1280,7 +1270,6 @@ static void qcom_pcie_host_deinit(struct dw_pcie_rp *pp)
 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
 	struct qcom_pcie *pcie = to_qcom_pcie(pci);
 
-	qcom_ep_reset_assert(pcie);
 	phy_power_off(pcie->phy);
 	pcie->cfg->ops->deinit(pcie);
 }
@@ -1624,6 +1613,8 @@ static int qcom_pcie_probe(struct platform_device *pdev)
 		ret = PTR_ERR(pcie->reset);
 		goto err_pm_runtime_put;
 	}
+
+	pp->perst = &pcie->reset;
 
 	pcie->parf = devm_platform_ioremap_resource_byname(pdev, "parf");
 	if (IS_ERR(pcie->parf)) {
