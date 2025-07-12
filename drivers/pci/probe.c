@@ -5,6 +5,7 @@
 
 #include <linux/kernel.h>
 #include <linux/delay.h>
+#include <linux/device.h>
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/msi.h>
@@ -706,6 +707,9 @@ EXPORT_SYMBOL(devm_pci_alloc_host_bridge);
 void pci_free_host_bridge(struct pci_host_bridge *bridge)
 {
 	put_device(&bridge->dev);
+	/* Clean up any pwrctrl children. */
+	device_for_each_child(&bridge->dev, NULL, of_platform_device_destroy);
+
 }
 EXPORT_SYMBOL(pci_free_host_bridge);
 
