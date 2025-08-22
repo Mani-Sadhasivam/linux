@@ -43,6 +43,14 @@
 		stdout-path = "serial0:115200n8";
 	};
 
+	dc12v: dc12v-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "DC12V";
+		regulator-min-microvolt = <12000000>;
+		regulator-max-microvolt = <12000000>;
+		regulator-always-on;
+	};
+
 	dp-connector {
 		compatible = "dp-connector";
 		label = "DP";
@@ -316,6 +324,44 @@
 				regulator-name = "vreg_pmu_pcie_1p8";
 			};
 		};
+	};
+
+	vbat_con: vbat-som-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "VBAT_CON";
+		vin-supply = <&dc12v>;
+		regulator-min-microvolt = <4200000>;
+		regulator-max-microvolt = <4200000>;
+		regulator-always-on;
+	};
+
+	pcie0_3p3v_dual: vldo-3v3-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "VLDO_3V3";
+
+		vin-supply = <&vbat_con>;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+
+		gpio = <&pm7250b_gpios 1 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+//		pinctrl-names = "default";
+//		pinctrl-0 = <&pcie0_pwren_state>;
+	};
+
+	pcie0_1p05v: vldo-1p05v-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "PCIE0_1P05";
+
+		vin-supply = <&vbat_con>;
+		regulator-min-microvolt = <1050000>;
+		regulator-max-microvolt = <1050000>;
+
+		/*
+		 * TODO: make it possible to drive same GPIO from two clients
+		 * gpio = <&pm7250b_gpios 1 GPIO_ACTIVE_HIGH>;
+		 * enable-active-high;
+		 */
 	};
 
 	vdd_ntn_0p9: regulator-vdd-ntn-0p9 {
@@ -867,7 +913,7 @@
 
 		device_type = "pci";
 		ranges;
-		bus-range = <0x2 0xff>;
+		bus-range = <0x2 0x10>;
 
 		vddc-supply = <&vdd_ntn_0p9>;
 		vdd18-supply = <&vdd_ntn_1p8>;
@@ -890,13 +936,17 @@
 
 			device_type = "pci";
 			ranges;
-			bus-range = <0x3 0xff>;
+			bus-range = <0x3 0x04>;
 		};
 
 		pcie@2,0 {
+			compatible = "pciclass,0604";
 			reg = <0x21000 0x0 0x0 0x0 0x0>;
 			#address-cells = <3>;
 			#size-cells = <2>;
+
+			vpcie3v3-supply = <&pcie0_3p3v_dual>;
+			reset-gpios = <&pm8350c_gpios 4 GPIO_ACTIVE_LOW>;
 
 			device_type = "pci";
 			ranges;
