@@ -214,6 +214,22 @@
 		regulator-boot-on;
 	};
 
+	vreg_wcn_3p3: regulator-wcn-3p3 {
+		compatible = "regulator-fixed";
+
+		regulator-name = "VREG_WCN_3P3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+
+		gpio = <&tlmm 214 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+
+		pinctrl-0 = <&wcn_sw_en>;
+		pinctrl-names = "default";
+
+		regulator-boot-on;
+	};
+
 	vreg_rtmr0_1p15: regulator-rtmr0-1p15 {
 		compatible = "regulator-fixed";
 
@@ -1061,6 +1077,16 @@
 &pcie4_port0 {
 	reset-gpios = <&tlmm 146 GPIO_ACTIVE_LOW>;
 	wake-gpios = <&tlmm 148 GPIO_ACTIVE_LOW>;
+	vpcie3v3-supply = <&vreg_wcn_3p3>;
+	vio1v8-supply = <&vreg_l15b_1p8>;
+	w-disable1-gpios = <&tlmm 117 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&wcn_wlan_en>;
+	pinctrl-names = "default";
+
+	wifi@0 {
+		compatible = "pci17cb,1107";
+		reg = <0x10000 0x0 0x0 0x0 0x0>;
+	};
 };
 
 &pcie5 {
@@ -1454,6 +1480,20 @@
 		drive-strength = <16>;
 		bias-disable;
 		output-low;
+	};
+
+	wcn_sw_en: wcn-sw-en-state {
+		pins = "gpio214";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	wcn_wlan_en: wcn-wlan-en-state {
+		pins = "gpio117";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
 	};
 
 	wwan_sw_en: wwan-sw-en-state {
