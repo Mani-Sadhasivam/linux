@@ -6,6 +6,7 @@
 
 #include <linux/clk.h>
 #include <linux/device.h>
+#include <linux/gpio/consumer.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/pci-pwrctrl.h>
@@ -17,12 +18,14 @@ struct pci_pwrctrl_slot_data {
 	struct pci_pwrctrl ctx;
 	struct regulator_bulk_data *supplies;
 	int num_supplies;
+	struct gpio_desc *w_dis1_gpio;
 };
 
 static void devm_pci_pwrctrl_slot_power_off(void *data)
 {
 	struct pci_pwrctrl_slot_data *slot = data;
 
+	gpiod_set_value_cansleep(slot->w_dis1_gpio, 0);
 	regulator_bulk_disable(slot->num_supplies, slot->supplies);
 	regulator_bulk_free(slot->num_supplies, slot->supplies);
 }
@@ -64,6 +67,13 @@ static int pci_pwrctrl_slot_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, PTR_ERR(clk),
 				     "Failed to enable slot clock\n");
 	}
+
+	slot->w_dis1_gpio = devm_gpiod_get_optional(dev, "w-disable1", GPIOD_OUT_LOW);
+	if (IS_ERR(slot->w_dis1_gpio))
+		return dev_err_probe(dev, PTR_ERR(slot->w_dis1_gpio),
+				     "Failed to get \"W_DISABLE1#\" GPIO\n");
+
+	gpiod_set_value_cansleep(slot->w_dis1_gpio, 1);
 
 	ret = devm_pci_pwrctrl_device_set_ready(dev, &slot->ctx);
 	if (ret)
