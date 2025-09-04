@@ -57,15 +57,6 @@ properties:
 required:
   - compatible
   - reg
-  - vddaon-supply
-  - vddwlcx-supply
-  - vddwlmx-supply
-  - vddrfacmn-supply
-  - vddrfa0p8-supply
-  - vddrfa1p2-supply
-  - vddrfa1p8-supply
-  - vddpcie0p9-supply
-  - vddpcie1p8-supply
 
 additionalProperties: false
 
@@ -99,6 +90,33 @@ examples:
                 vddrfa1p8-supply = <&vreg_pmu_rfa_1p8>;
                 vddpcie0p9-supply = <&vreg_pmu_pcie_0p9>;
                 vddpcie1p8-supply = <&vreg_pmu_pcie_1p8>;
+            };
+        };
+    };
+
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    pcie {
+        #address-cells = <3>;
+        #size-cells = <2>;
+
+        pcie@0 {
+            device_type = "pci";
+            reg = <0x0 0x0 0x0 0x0 0x0>;
+            #address-cells = <3>;
+            #size-cells = <2>;
+            ranges;
+            bus-range = <0x01 0xff>;
+
+            reset-gpios = <&tlmm 146 GPIO_ACTIVE_LOW>;
+            wake-gpios = <&tlmm 148 GPIO_ACTIVE_LOW>;
+            vpcie3v3-supply = <&vreg_wcn_3p3>;
+            vio1v8-supply = <&vreg_l15b_1p8>;
+            w-disable1-gpios = <&tlmm 117 GPIO_ACTIVE_HIGH>;
+
+            wifi@0 {
+                compatible = "pci17cb,1107";
+                reg = <0x10000 0x0 0x0 0x0 0x0>;
             };
         };
     };
