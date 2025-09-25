@@ -5799,35 +5799,26 @@ DECLARE_PCI_FIXUP_CLASS_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, PCI_ANY_ID,
  * To avoid hitting the erratum when doing the config reads, we disable ACS
  * SV around this process.
  */
-int pci_idt_bus_quirk(struct pci_bus *bus, int devfn, u32 *l, int timeout)
+static void pci_idt_disable_acs_sv(struct pci_dev *pdev)
 {
-	int pos;
-	u16 ctrl = 0;
-	bool found;
-	struct pci_dev *bridge = bus->self;
+	u16 acs_cap, val;
 
-	pos = bridge->acs_cap;
+	pci_info(pdev, "%s: %d", __func__, __LINE__);
 
-	/* Disable ACS SV before initial config reads */
-	if (pos) {
-		pci_read_config_word(bridge, pos + PCI_ACS_CTRL, &ctrl);
-		if (ctrl & PCI_ACS_SV)
-			pci_write_config_word(bridge, pos + PCI_ACS_CTRL,
-					      ctrl & ~PCI_ACS_SV);
-	}
+	/* Check for ACS P2P Request Redirect use */
+	acs_cap = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ACS);
+	if (!acs_cap)
+		return;
 
-	found = pci_bus_generic_read_dev_vendor_id(bus, devfn, l, timeout);
-
-	/* Write Vendor ID (read-only) so the endpoint latches its bus/dev */
-	if (found)
-		pci_bus_write_config_word(bus, devfn, PCI_VENDOR_ID, 0);
-
-	/* Re-enable ACS_SV if it was previously enabled */
-	if (ctrl & PCI_ACS_SV)
-		pci_write_config_word(bridge, pos + PCI_ACS_CTRL, ctrl);
-
-	return found;
+	pci_read_config_word(pdev, acs_cap + PCI_ACS_CTRL, &val);
+	pci_info(pdev, "ACS_CTRL Before: 0x%x", val);
+	if (val & PCI_ACS_SV)
+		pci_write_config_word(pdev, acs_cap + PCI_ACS_CTRL,
+				      val & ~PCI_ACS_SV);
+	pci_info(pdev, "ACS_CTRL After: 0x%x", val & ~PCI_ACS_SV);
 }
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_IDT, 0x80b5, pci_idt_disable_acs_sv);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_IDT, 0x8090, pci_idt_disable_acs_sv);
 
 /*
  * Microsemi Switchtec NTB uses devfn proxy IDs to move TLPs between
