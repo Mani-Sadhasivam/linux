@@ -976,4 +976,12 @@ struct coreboot_device_id {
 	kernel_ulong_t driver_data;
 };
 
+#define SERDEV_DEVICE_MODALIAS_FMT "serdev:%s"
+#define SERDEV_NAME_SIZE 32
+
+struct serdev_device_id {
+	const char name[SERDEV_NAME_SIZE];
+	kernel_ulong_t driver_data;
+};
+
 #endif /* LINUX_MOD_DEVICETABLE_H */

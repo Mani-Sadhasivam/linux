@@ -20,6 +20,10 @@
 	compatible = "lenovo,thinkpad-t14s", "qcom,x1e78100", "qcom,x1e80100";
 	chassis-type = "laptop";
 
+	aliases {
+		serial0 = &uart14;
+	};
+
 	wcd938x: audio-codec {
 		compatible = "qcom,wcd9385-codec";
 
@@ -428,6 +432,33 @@
 
 			platform {
 				sound-dai = <&q6apm>;
+			};
+		};
+	};
+
+	m2-connector {
+		compatible = "pci-m2-connector";
+		vpcie3v3-supply = <&vreg_wcn_3p3>;
+		vpcie1v8-supply = <&vreg_l15b_1p8>;
+		w-disable1-gpios = <&tlmm 117 GPIO_ACTIVE_HIGH>;
+		w-disable2-gpios = <&tlmm 116 GPIO_ACTIVE_HIGH>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				m2_pcie_ep: endpoint {
+					remote-endpoint = <&pcie4_port0_ep>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+				m2_uart_ep: endpoint {
+					remote-endpoint = <&uart14_ep>;
+				};
 			};
 		};
 	};
@@ -1077,15 +1108,18 @@
 &pcie4_port0 {
 	reset-gpios = <&tlmm 146 GPIO_ACTIVE_LOW>;
 	wake-gpios = <&tlmm 148 GPIO_ACTIVE_LOW>;
-	vpcie3v3-supply = <&vreg_wcn_3p3>;
-	vio1v8-supply = <&vreg_l15b_1p8>;
-	w-disable1-gpios = <&tlmm 117 GPIO_ACTIVE_HIGH>;
 	pinctrl-0 = <&wcn_wlan_en>;
 	pinctrl-names = "default";
 
 	wifi@0 {
 		compatible = "pci17cb,1107";
 		reg = <0x10000 0x0 0x0 0x0 0x0>;
+	};
+
+	port {
+		pcie4_port0_ep: endpoint {
+			remote-endpoint = <&m2_pcie_ep>;
+		};
 	};
 };
 
@@ -1501,6 +1535,15 @@
 		function = "gpio";
 		drive-strength = <4>;
 		bias-disable;
+	};
+};
+
+&uart14 {
+	status = "okay";
+	port {
+		uart14_ep: endpoint {
+			remote-endpoint = <&m2_uart_ep>;
+		};
 	};
 };
 

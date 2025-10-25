@@ -9,6 +9,9 @@
 #include <linux/gpio/consumer.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
+#include <linux/of.h>
+#include <linux/of_graph.h>
+#include <linux/of_platform.h>
 #include <linux/pci-pwrctrl.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
@@ -32,10 +35,29 @@ static void devm_pci_pwrctrl_slot_power_off(void *data)
 
 static int pci_pwrctrl_slot_probe(struct platform_device *pdev)
 {
+	struct platform_device *remote_pdev;
 	struct pci_pwrctrl_slot_data *slot;
 	struct device *dev = &pdev->dev;
+	struct device_node *remote, *endpoint;
 	struct clk *clk;
 	int ret;
+
+	/* FIXME: Assuming port 0 is PCIe interface */
+	endpoint = of_graph_get_endpoint_by_regs(dev_of_node(dev), 0, -1);
+	if (endpoint) {
+		remote = of_graph_get_remote_port_parent(endpoint);
+		if (remote) {
+			remote_pdev = of_find_device_by_node(remote);
+			if (!remote_pdev || !remote_pdev->dev.driver)
+				return -EPROBE_DEFER;
+
+			/* Now add devlink to the connector node */
+			if (!device_link_add(dev, &remote_pdev->dev,
+			       DL_FLAG_PM_RUNTIME | DL_FLAG_STATELESS))
+				dev_err(dev, "Failed to link %s\n",
+					dev_name(&remote_pdev->dev));
+		}
+	}
 
 	slot = devm_kzalloc(dev, sizeof(*slot), GFP_KERNEL);
 	if (!slot)

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "PCI connector drivers"
+	depends on PCI
+
+config PCI_CONNECTOR_M2
+	tristate "PCIe M.2 Connector driver"
+	help
+	 Enables support for handling the PCIe M.2 connector
+
+endmenu
+

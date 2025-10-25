@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/of_graph.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
 #include <linux/property.h>
@@ -48,13 +49,16 @@ static int serdev_device_uevent(const struct device *dev, struct kobj_uevent_env
 {
 	int rc;
 
-	/* TODO: platform modalias */
-
 	rc = acpi_device_uevent_modalias(dev, env);
 	if (rc != -ENODEV)
 		return rc;
 
-	return of_device_uevent_modalias(dev, env);
+	rc = of_device_uevent_modalias(dev, env);
+	if (rc != -ENODEV)
+		return rc;
+
+	return add_uevent_var(env, "MODALIAS=" SERDEV_DEVICE_MODALIAS_FMT,
+					dev_name(dev));
 }
 
 static void serdev_device_release(struct device *dev)
@@ -85,12 +89,33 @@ static const struct device_type serdev_ctrl_type = {
 	.release	= serdev_ctrl_release,
 };
 
+static int serdev_driver_match_device(struct device *dev, const struct device_driver *drv)
+{
+	const struct serdev_device_driver *serdev_drv = to_serdev_device_driver(drv);
+	struct serdev_device *serdev = to_serdev_device(dev);
+	const struct serdev_device_id *id;
+
+	if (!serdev_drv->id_table)
+		return 0;
+
+	for (id = serdev_drv->id_table; id->name[0]; id++) {
+		if (!strcmp(dev_name(dev), id->name)) {
+			serdev->id = id;
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 static int serdev_device_match(struct device *dev, const struct device_driver *drv)
 {
 	if (!is_serdev_device(dev))
 		return 0;
 
-	/* TODO: platform matching */
+	if (serdev_driver_match_device(dev, drv))
+		return 1;
+
 	if (acpi_driver_match_device(dev, drv))
 		return 1;
 
@@ -100,14 +125,18 @@ static int serdev_device_match(struct device *dev, const struct device_driver *d
 /**
  * serdev_device_add() - add a device previously constructed via serdev_device_alloc()
  * @serdev:	serdev_device to be added
+ * @name:	name of the serdev device (optional)
  */
-int serdev_device_add(struct serdev_device *serdev)
+int serdev_device_add(struct serdev_device *serdev, const char *name)
 {
 	struct serdev_controller *ctrl = serdev->ctrl;
 	struct device *parent = serdev->dev.parent;
 	int err;
 
-	dev_set_name(&serdev->dev, "%s-%d", dev_name(parent), serdev->nr);
+	if (name)
+		dev_set_name(&serdev->dev, "%s", name);
+	else
+		dev_set_name(&serdev->dev, "%s-%d", dev_name(parent), serdev->nr);
 
 	/* Only a single slave device is currently supported. */
 	if (ctrl->serdev) {
@@ -509,12 +538,26 @@ err_free:
 }
 EXPORT_SYMBOL_GPL(serdev_controller_alloc);
 
+struct serdev_controller *of_find_serdev_controller_by_node(struct device_node *node)
+{
+	struct device *dev = bus_find_device_by_of_node(&serdev_bus_type, node);
+
+	if (!dev)
+		return NULL;
+
+	return (dev->type == &serdev_ctrl_type) ? to_serdev_controller(dev) : NULL;
+}
+EXPORT_SYMBOL_GPL(of_find_serdev_controller_by_node);
+
 static int of_serdev_register_devices(struct serdev_controller *ctrl)
 {
 	struct device_node *node;
 	struct serdev_device *serdev = NULL;
 	int err;
 	bool found = false;
+
+	if (of_graph_is_present(ctrl->dev.of_node))
+		return 0;
 
 	for_each_available_child_of_node(ctrl->dev.of_node, node) {
 		if (!of_property_present(node, "compatible"))
@@ -528,7 +571,7 @@ static int of_serdev_register_devices(struct serdev_controller *ctrl)
 
 		device_set_node(&serdev->dev, of_fwnode_handle(node));
 
-		err = serdev_device_add(serdev);
+		err = serdev_device_add(serdev, NULL);
 		if (err) {
 			dev_err(&serdev->dev,
 				"failure adding device. status %pe\n",
@@ -676,7 +719,7 @@ static acpi_status acpi_serdev_register_device(struct serdev_controller *ctrl,
 	ACPI_COMPANION_SET(&serdev->dev, adev);
 	acpi_device_set_enumerated(adev);
 
-	err = serdev_device_add(serdev);
+	err = serdev_device_add(serdev, NULL);
 	if (err) {
 		dev_err(&serdev->dev,
 			"failure adding ACPI serdev device. status %pe\n",
@@ -775,6 +818,7 @@ int serdev_controller_add(struct serdev_controller *ctrl)
 
 	ret_of = of_serdev_register_devices(ctrl);
 	ret_acpi = acpi_serdev_register_devices(ctrl);
+
 	if (ret_of && ret_acpi) {
 		dev_dbg(&ctrl->dev, "no devices registered: of:%pe acpi:%pe\n",
 			ERR_PTR(ret_of), ERR_PTR(ret_acpi));
