@@ -39,6 +39,7 @@ struct serdev_device_ops {
  * @ops:	Device operations.
  * @write_comp	Completion used by serdev_device_write() internally
  * @write_lock	Lock to serialize access when writing data
+ * @id:		serdev device ID entry
  */
 struct serdev_device {
 	struct device dev;
@@ -47,30 +48,27 @@ struct serdev_device {
 	const struct serdev_device_ops *ops;
 	struct completion write_comp;
 	struct mutex write_lock;
+	const struct serdev_device_id *id;
 };
 
-static inline struct serdev_device *to_serdev_device(struct device *d)
-{
-	return container_of(d, struct serdev_device, dev);
-}
+#define to_serdev_device(d) container_of(d, struct serdev_device, dev)
 
 /**
  * struct serdev_device_driver - serdev slave device driver
  * @driver:	serdev device drivers should initialize name field of this
  *		structure.
+ * @id_table:	serdev device ID table
  * @probe:	binds this driver to a serdev device.
  * @remove:	unbinds this driver from the serdev device.
  */
 struct serdev_device_driver {
 	struct device_driver driver;
+	const struct serdev_device_id *id_table;
 	int	(*probe)(struct serdev_device *);
 	void	(*remove)(struct serdev_device *);
 };
 
-static inline struct serdev_device_driver *to_serdev_device_driver(struct device_driver *d)
-{
-	return container_of(d, struct serdev_device_driver, driver);
-}
+#define to_serdev_device_driver(d) container_of(d, struct serdev_device_driver, driver)
 
 enum serdev_parity {
 	SERDEV_PARITY_NONE,
@@ -165,7 +163,7 @@ static inline void serdev_controller_put(struct serdev_controller *ctrl)
 }
 
 struct serdev_device *serdev_device_alloc(struct serdev_controller *);
-int serdev_device_add(struct serdev_device *);
+int serdev_device_add(struct serdev_device *, const char *);
 void serdev_device_remove(struct serdev_device *);
 
 struct serdev_controller *serdev_controller_alloc(struct device *host,
@@ -341,5 +339,14 @@ static inline bool serdev_acpi_get_uart_resource(struct acpi_resource *ares,
 	return false;
 }
 #endif /* CONFIG_ACPI */
+
+#ifdef CONFIG_OF
+struct serdev_controller *of_find_serdev_controller_by_node(struct device_node *node);
+#else
+struct serdev_controller *of_find_serdev_controller_by_node(struct device_node *node)
+{
+	return NULL;
+}
+#endif /* CONFIG_OF */
 
 #endif /*_LINUX_SERDEV_H */

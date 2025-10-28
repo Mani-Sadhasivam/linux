@@ -2170,6 +2170,11 @@ static const struct qca_device_data qca_soc_data_wcn7850 __maybe_unused = {
 	.capabilities = QCA_CAP_WIDEBAND_SPEECH | QCA_CAP_VALID_LE_STATES,
 };
 
+static const struct qca_device_data qca_soc_data_wcn7850_m2 __maybe_unused = {
+	.soc_type = QCA_WCN7850,
+	.capabilities = QCA_CAP_WIDEBAND_SPEECH | QCA_CAP_VALID_LE_STATES,
+};
+
 static void qca_power_shutdown(struct hci_uart *hu)
 {
 	struct qca_serdev *qcadev;
@@ -2343,7 +2348,11 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 		return -ENOMEM;
 
 	qcadev->serdev_hu.serdev = serdev;
+
 	data = device_get_match_data(&serdev->dev);
+	if (!data && serdev->id)
+		data = (const struct qca_device_data *) serdev->id->driver_data;
+
 	serdev_device_set_drvdata(serdev, qcadev);
 	device_property_read_string_array(&serdev->dev, "firmware-name",
 					 qcadev->firmware_name, ARRAY_SIZE(qcadev->firmware_name));
@@ -2484,6 +2493,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 		BT_ERR("serdev registration failed");
 		return err;
 	}
+
 
 	hdev = qcadev->serdev_hu.hdev;
 
@@ -2740,6 +2750,12 @@ static const struct acpi_device_id qca_bluetooth_acpi_match[] = {
 MODULE_DEVICE_TABLE(acpi, qca_bluetooth_acpi_match);
 #endif
 
+static const struct serdev_device_id qca_bluetooth_serdev_match[] = {
+	{ "WCN7850", (kernel_ulong_t)&qca_soc_data_wcn7850_m2 },
+	{ },
+};
+MODULE_DEVICE_TABLE(serdev, qca_bluetooth_serdev_match);
+
 #ifdef CONFIG_DEV_COREDUMP
 static void hciqca_coredump(struct device *dev)
 {
@@ -2756,6 +2772,7 @@ static void hciqca_coredump(struct device *dev)
 static struct serdev_device_driver qca_serdev_driver = {
 	.probe = qca_serdev_probe,
 	.remove = qca_serdev_remove,
+	.id_table = qca_bluetooth_serdev_match,
 	.driver = {
 		.name = "hci_uart_qca",
 		.of_match_table = of_match_ptr(qca_bluetooth_of_match),
