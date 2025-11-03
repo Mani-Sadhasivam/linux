@@ -14,6 +14,7 @@
 #include <linux/of_platform.h>
 #include <linux/pci-pwrctrl.h>
 #include <linux/platform_device.h>
+#include <linux/pwrseq/consumer.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 
@@ -22,6 +23,7 @@ struct pci_pwrctrl_slot_data {
 	struct regulator_bulk_data *supplies;
 	int num_supplies;
 	struct gpio_desc *w_dis1_gpio;
+	struct pwrseq_desc *pwrseq;
 };
 
 static void devm_pci_pwrctrl_slot_power_off(void *data)
@@ -42,6 +44,7 @@ static int pci_pwrctrl_slot_probe(struct platform_device *pdev)
 	struct clk *clk;
 	int ret;
 
+#if 0
 	/* FIXME: Assuming port 0 is PCIe interface */
 	endpoint = of_graph_get_endpoint_by_regs(dev_of_node(dev), 0, -1);
 	if (endpoint) {
@@ -58,12 +61,29 @@ static int pci_pwrctrl_slot_probe(struct platform_device *pdev)
 					dev_name(&remote_pdev->dev));
 		}
 	}
+#endif
 
 	slot = devm_kzalloc(dev, sizeof(*slot), GFP_KERNEL);
 	if (!slot)
 		return -ENOMEM;
 
 	pci_pwrctrl_init(&slot->ctx, dev);
+
+	if (of_graph_is_present(dev_of_node(dev))) {
+		dev_info(dev, "#### %s: %d POWERING ON", __func__, __LINE__);
+
+		slot->pwrseq = devm_pwrseq_get(dev, "wlan");
+		if (IS_ERR(slot->pwrseq))
+			return dev_err_probe(dev, PTR_ERR(slot->pwrseq),
+				     "Failed to get the power sequencer\n");
+
+		ret = pwrseq_power_on(slot->pwrseq);
+		if (ret)
+			return dev_err_probe(dev, ret,
+				     "Failed to power-on the device\n");
+
+		goto set_ready;
+	}
 
 	ret = of_regulator_bulk_get_all(dev, dev_of_node(dev),
 					&slot->supplies);
@@ -79,6 +99,7 @@ static int pci_pwrctrl_slot_probe(struct platform_device *pdev)
 		goto err_regulator_free;
 	}
 
+	/* FIXME */
 	ret = devm_add_action_or_reset(dev, devm_pci_pwrctrl_slot_power_off,
 				       slot);
 	if (ret)
@@ -97,6 +118,7 @@ static int pci_pwrctrl_slot_probe(struct platform_device *pdev)
 
 	gpiod_set_value_cansleep(slot->w_dis1_gpio, 1);
 
+set_ready:
 	ret = devm_pci_pwrctrl_device_set_ready(dev, &slot->ctx);
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to register pwrctrl driver\n");

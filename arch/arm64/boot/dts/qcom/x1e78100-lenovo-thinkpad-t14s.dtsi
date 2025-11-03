@@ -437,9 +437,9 @@
 	};
 
 	m2-connector {
-		compatible = "pci-m2-connector";
+		compatible = "pci-m2-a-connector";
 		vpcie3v3-supply = <&vreg_wcn_3p3>;
-		vpcie1v8-supply = <&vreg_l15b_1p8>;
+		vio1v8-supply = <&vreg_l15b_1p8>;
 		w-disable1-gpios = <&tlmm 117 GPIO_ACTIVE_HIGH>;
 		w-disable2-gpios = <&tlmm 116 GPIO_ACTIVE_HIGH>;
 
