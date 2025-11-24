@@ -54,5 +54,12 @@ int pci_pwrctrl_device_set_ready(struct pci_pwrctrl *pwrctrl);
 void pci_pwrctrl_device_unset_ready(struct pci_pwrctrl *pwrctrl);
 int devm_pci_pwrctrl_device_set_ready(struct device *dev,
 				     struct pci_pwrctrl *pwrctrl);
+#if IS_ENABLED(CONFIG_PCI_PWRCTRL)
+int pci_pwrctrl_create_and_power_on(struct device *parent);
+void pci_pwrctrl_power_off_and_destroy(struct device *parent);
+#else
+static inline int __must_check pci_pwrctrl_create_and_power_on(struct device *parent) { return 0; }
+static int pci_pwrctrl_power_off_and_destroy(struct device *parent) { }
+#endif
 
 #endif /* __PCI_PWRCTRL_H__ */

@@ -370,6 +370,61 @@ static void pci_pwrctrl_destroy_devices(struct device *parent)
 		pci_pwrctrl_destroy_device(child);
 }
 
+/**
+ * pci_pwrctrl_power_off_and_destroy - Power off and destroy pwrctrl devices
+ *
+ * @parent: Parent PCI device for which the pwrctrl devices need to be powered
+ * off and destroyed.
+ *
+ * This function recursively powers off and destroys the pwrctrl devices for the
+ * child nodes of the specified PCI parent device in a depth first manner.
+ */
+void pci_pwrctrl_power_off_and_destroy(struct device *parent)
+{
+	struct device_node *np = parent->of_node;
+
+	for_each_available_child_of_node_scoped(np, child) {
+		pci_pwrctrl_power_off_device(child);
+		pci_pwrctrl_destroy_device(child);
+	}
+}
+
+/**
+ * pci_pwrctrl_create_and_power_on - Create and power on the pwrctrl devices
+ *
+ * @parent: Parent PCI device for which the pwrctrl devices need to be
+ * created and powered on.
+ *
+ * This function recursively creates pwrctrl devices for the child nodes
+ * of the specified PCI parent device in a depth first manner and powers them
+ * on.
+ *
+ * Returns: 0 on success, -EPROBE_DEFER if the pwrctrl driver is not bound to
+ * the device and negative error number on other errors.
+ */
+int __must_check pci_pwrctrl_create_and_power_on(struct device *parent)
+{
+	int ret;
+
+	ret = pci_pwrctrl_create_devices(parent);
+	if (ret) {
+		pci_pwrctrl_destroy_devices(parent);
+		return ret;
+	}
+
+	ret = pci_pwrctrl_power_on_devices(parent);
+	if (ret) {
+		pci_pwrctrl_power_off_devices(parent);
+		/* Do not destroy the devices if the driver is not available */
+		if (ret != -EPROBE_DEFER)
+			pci_pwrctrl_destroy_devices(parent);
+		return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(pci_pwrctrl_create_and_power_on);
+
 MODULE_AUTHOR("Bartosz Golaszewski <bartosz.golaszewski@linaro.org>");
 MODULE_DESCRIPTION("PCI Device Power Control core driver");
 MODULE_LICENSE("GPL");
