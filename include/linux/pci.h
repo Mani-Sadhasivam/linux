@@ -544,6 +544,7 @@ struct pci_dev {
 #endif
 	u16		acs_cap;	/* ACS Capability offset */
 	u16		acs_capabilities;
+	u16		acs_broken_cap;
 	u8		supported_speeds; /* Supported Link Speeds Vector */
 	phys_addr_t	rom;		/* Physical address if not from BAR */
 	size_t		romlen;		/* Length if not from BAR */
