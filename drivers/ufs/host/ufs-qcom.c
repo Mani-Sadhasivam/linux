@@ -130,6 +130,8 @@ static unsigned long ufs_qcom_opp_freq_to_clk_freq(struct ufs_hba *hba,
 						   unsigned long freq, char *name);
 static int ufs_qcom_set_core_clk_ctrl(struct ufs_hba *hba, bool is_scale_up, unsigned long freq);
 
+static u32 ufs_qcom_freq_to_gear_speed(struct ufs_hba *hba, unsigned long freq);
+
 static struct ufs_qcom_host *rcdev_to_ufs_host(struct reset_controller_dev *rcd)
 {
 	return container_of(rcd, struct ufs_qcom_host, rcdev);
@@ -914,10 +916,9 @@ static int ufs_qcom_icc_set_bw(struct ufs_qcom_host *host, u32 mem_bw, u32 cfg_b
 	return 0;
 }
 
-static struct __ufs_qcom_bw_table ufs_qcom_get_bw_table(struct ufs_qcom_host *host)
+static struct __ufs_qcom_bw_table ufs_qcom_get_bw_table(struct ufs_qcom_host *host, u32 gear)
 {
 	struct ufs_pa_layer_attr *p = &host->dev_req_params;
-	int gear = max_t(u32, p->gear_rx, p->gear_tx);
 	int lane = max_t(u32, p->lane_rx, p->lane_tx);
 
 	if (WARN_ONCE(gear > QCOM_UFS_MAX_GEAR,
@@ -940,11 +941,11 @@ static struct __ufs_qcom_bw_table ufs_qcom_get_bw_table(struct ufs_qcom_host *ho
 	}
 }
 
-static int ufs_qcom_icc_update_bw(struct ufs_qcom_host *host)
+static int ufs_qcom_icc_update_bw(struct ufs_qcom_host *host, u32 gear)
 {
 	struct __ufs_qcom_bw_table bw_table;
 
-	bw_table = ufs_qcom_get_bw_table(host);
+	bw_table = ufs_qcom_get_bw_table(host, gear);
 
 	return ufs_qcom_icc_set_bw(host, bw_table.mem_bw, bw_table.cfg_bw);
 }
@@ -1029,7 +1030,7 @@ static int ufs_qcom_pwr_change_notify(struct ufs_hba *hba,
 		memcpy(&host->dev_req_params,
 				dev_req_params, sizeof(*dev_req_params));
 
-		ufs_qcom_icc_update_bw(host);
+		ufs_qcom_icc_update_bw(host, host->dev_req_params.gear_tx);
 
 		/* disable the device ref clock if entered PWM mode */
 		if (ufshcd_is_hs_mode(&hba->pwr_info) &&
@@ -1433,7 +1434,7 @@ static int ufs_qcom_setup_clocks(struct ufs_hba *hba, bool on,
 	switch (status) {
 	case PRE_CHANGE:
 		if (on) {
-			ufs_qcom_icc_update_bw(host);
+			ufs_qcom_icc_update_bw(host, host->dev_req_params.gear_tx);
 			if (ufs_qcom_is_link_hibern8(hba)) {
 				err = ufs_qcom_enable_lane_clks(host);
 				if (err) {
@@ -1933,7 +1934,7 @@ static int ufs_qcom_clk_scale_notify(struct ufs_hba *hba, bool scale_up,
 			return err;
 		}
 
-		ufs_qcom_icc_update_bw(host);
+		ufs_qcom_icc_update_bw(host, ufs_qcom_freq_to_gear_speed(hba, target_freq));
 		ufshcd_uic_hibern8_exit(hba);
 	}
 
