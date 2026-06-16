@@ -1693,18 +1693,55 @@ static const struct pci_ecam_ops pci_qcom_ecam_ops = {
 	}
 };
 
+/*
+ * Check if @node is a descendant of @ancestor in the DT hierarchy.
+ * Used to determine if a GPIO provider sits behind this PCIe bus.
+ */
+static bool of_node_is_descendant(const struct device_node *ancestor,
+				  struct device_node *node)
+{
+	struct device_node *parent;
+
+	for (parent = of_get_parent(node); parent;
+	     parent = of_get_next_parent(parent)) {
+		if (parent == ancestor) {
+			of_node_put(parent);
+			return true;
+		}
+	}
+
+	return false;
+}
+
 /* Parse PERST# from all nodes in depth first manner starting from @np */
 static int qcom_pcie_parse_perst(struct qcom_pcie *pcie,
 				 struct qcom_pcie_port *port,
 				 struct device_node *np)
 {
 	struct device *dev = pcie->pci->dev;
+	struct device_node *gpio_np;
 	struct qcom_pcie_perst *perst;
 	struct gpio_desc *reset;
 	int ret;
 
 	if (!of_find_property(np, "reset-gpios", NULL))
 		goto parse_child_node;
+
+	/*
+	 * Skip GPIOs provided by a controller behind this PCIe bus (e.g., a
+	 * PCIe switch with GPIO controller capability). Such controllers won't
+	 * be available at RC probe time and their PERST# should be controlled
+	 * by the respective PCI client driver implementation.
+	 */
+	gpio_np = of_parse_phandle(np, "reset-gpios", 0);
+	if (!gpio_np)
+		return -EINVAL;
+
+	if (of_node_is_descendant(dev->of_node, gpio_np)) {
+		of_node_put(gpio_np);
+		goto parse_child_node;
+	}
+	of_node_put(gpio_np);
 
 	reset = devm_fwnode_gpiod_get(dev, of_fwnode_handle(np), "reset",
 				      GPIOD_OUT_HIGH, "PERST#");
