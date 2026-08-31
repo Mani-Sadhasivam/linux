@@ -16,6 +16,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/auxiliary_bus.h>
 #include <linux/clk.h>
 #include <linux/completion.h>
 #include <linux/debugfs.h>
@@ -29,6 +30,7 @@
 #include <linux/acpi.h>
 #include <linux/platform_device.h>
 #include <linux/pwrseq/consumer.h>
+#include <linux/pwrseq/pcie-m2-bt.h>
 #include <linux/regulator/consumer.h>
 #include <linux/serdev.h>
 #include <linux/string_choices.h>
@@ -2850,15 +2852,114 @@ static struct serdev_device_driver qca_serdev_driver = {
 	},
 };
 
+static int qca_bt_aux_probe(struct auxiliary_device *adev,
+			    const struct auxiliary_device_id *id)
+{
+	struct pcie_m2_bt_auxdev *bt_auxdev = to_pcie_m2_bt_auxdev(adev);
+	struct serdev_device *serdev = bt_auxdev->serdev;
+	const struct qca_device_data *data;
+	struct qca_serdev *qcadev;
+	struct hci_dev *hdev;
+	bool controllable;
+	int err;
+
+	data = (const struct qca_device_data *)id->driver_data;
+	if (!data)
+		return -ENODEV;
+
+	qcadev = devm_kzalloc(&adev->dev, sizeof(*qcadev), GFP_KERNEL);
+	if (!qcadev)
+		return -ENOMEM;
+
+	qcadev->serdev_hu.serdev = serdev;
+	qcadev->btsoc_type = data->soc_type;
+	serdev_device_set_drvdata(serdev, qcadev);
+
+	qcadev->pwrseq = devm_pwrseq_get(&adev->dev, bt_auxdev->pwrseq_target);
+	if (IS_ERR(qcadev->pwrseq))
+		return dev_err_probe(&adev->dev, PTR_ERR(qcadev->pwrseq),
+				     "failed to acquire power sequencer\n");
+
+	/*
+	 * When the host cannot gate the BT power individually, treat it as
+	 * always-on.
+	 */
+	controllable = pwrseq_is_controllable(qcadev->pwrseq);
+	if (!controllable) {
+		pwrseq_enable(qcadev->pwrseq);
+		qcadev->pwrseq = NULL;
+	}
+
+	err = hci_uart_register_device(&qcadev->serdev_hu, &qca_proto);
+	if (err)
+		return dev_err_probe(&adev->dev, err,
+				     "failed to register hci_uart device\n");
+
+	hdev = qcadev->serdev_hu.hdev;
+
+	if (controllable) {
+		hci_set_quirk(hdev, HCI_QUIRK_NON_PERSISTENT_SETUP);
+		hdev->shutdown = qca_hci_shutdown;
+	}
+
+	if (data->capabilities & QCA_CAP_WIDEBAND_SPEECH)
+		hci_set_quirk(hdev, HCI_QUIRK_WIDEBAND_SPEECH_SUPPORTED);
+
+	if (!(data->capabilities & QCA_CAP_VALID_LE_STATES))
+		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_LE_STATES);
+
+	if (data->capabilities & QCA_CAP_HFP_HW_OFFLOAD)
+		qcadev->support_hfp_hw_offload = true;
+
+	auxiliary_set_drvdata(adev, qcadev);
+
+	return 0;
+}
+
+static void qca_bt_aux_remove(struct auxiliary_device *adev)
+{
+	struct qca_serdev *qcadev = auxiliary_get_drvdata(adev);
+
+	hci_uart_unregister_device(&qcadev->serdev_hu);
+}
+
+static const struct auxiliary_device_id qca_bt_aux_id_table[] = {
+	{
+		.name = "pwrseq_pcie_m2.qca2066-bt",
+		.driver_data = (kernel_ulong_t)&qca_soc_data_qca2066,
+	},
+	{
+		.name = "pwrseq_pcie_m2.wcn6855-bt",
+		.driver_data = (kernel_ulong_t)&qca_soc_data_wcn6855,
+	},
+	{
+		.name = "pwrseq_pcie_m2.wcn7850-bt",
+		.driver_data = (kernel_ulong_t)&qca_soc_data_wcn7850,
+	},
+	{ }
+};
+MODULE_DEVICE_TABLE(auxiliary, qca_bt_aux_id_table);
+
+static struct auxiliary_driver qca_bt_aux_driver = {
+	.name = "qca_bt",
+	.probe = qca_bt_aux_probe,
+	.remove = qca_bt_aux_remove,
+	.id_table = qca_bt_aux_id_table,
+};
+
 int __init qca_init(void)
 {
 	serdev_device_driver_register(&qca_serdev_driver);
+
+	auxiliary_driver_register(&qca_bt_aux_driver);
 
 	return hci_uart_register_proto(&qca_proto);
 }
 
 int __exit qca_deinit(void)
 {
+	auxiliary_driver_unregister(&qca_bt_aux_driver);
+
 	serdev_device_driver_unregister(&qca_serdev_driver);
 
 	return hci_uart_unregister_proto(&qca_proto);
