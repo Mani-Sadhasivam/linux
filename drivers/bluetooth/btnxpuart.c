@@ -10,7 +10,6 @@
 #include <linux/auxiliary_bus.h>
 #include <linux/serdev.h>
 #include <linux/of.h>
-#include <linux/of_graph.h>
 #include <linux/pwrseq/consumer.h>
 #include <linux/pwrseq/pcie-m2-bt.h>
 #include <linux/skbuff.h>
@@ -1820,28 +1819,6 @@ static void nxp_coredump_notify(struct hci_dev *hdev, int state)
 	kobject_uevent_env(&serdev->dev.kobj, KOBJ_CHANGE, envp);
 }
 
-/*
- * Check if the remote M.2 connector device linked via OF graph is present
- * and available. This is used to determine whether the pwrseq path should
- * be taken. When the remote connector node is disabled (e.g., by a DT
- * overlay switching from PCIe WiFi to SDIO WiFi), the pwrseq path is
- * skipped, allowing the BT driver to use a direct bluetooth child node
- * instead.
- */
-static bool nxp_m2_connector_is_available(struct device *dev)
-{
-	struct device_node *ep __free(device_node) =
-		of_graph_get_next_endpoint(dev_of_node(dev), NULL);
-
-	if (!ep)
-		return false;
-
-	struct device_node *remote __free(device_node) =
-		of_graph_get_remote_port_parent(ep);
-
-	return remote && of_device_is_available(remote);
-}
-
 static int nxp_register_dev(struct btnxpuart_dev *nxpdev)
 {
 	struct serdev_device *serdev = nxpdev->serdev;
@@ -1962,30 +1939,7 @@ static int nxp_serdev_probe(struct serdev_device *serdev)
 		return err;
 	}
 
-	if (nxp_m2_connector_is_available(&serdev->ctrl->dev)) {
-		struct pwrseq_desc *pwrseq;
-
-		pwrseq = pwrseq_get(&serdev->ctrl->dev, "uart");
-		if (IS_ERR(pwrseq))
-			return dev_err_probe(&serdev->dev, PTR_ERR(pwrseq),
-					     "failed to get pwrseq\n");
-
-		nxpdev->pwrseq = pwrseq;
-		err = pwrseq_enable(pwrseq);
-		if (err)
-			goto err_pwrseq_put;
-	}
-
-	err = nxp_register_dev(nxpdev);
-	if (err)
-		goto err_pwrseq_put;
-
-	return 0;
-
-err_pwrseq_put:
-	if (nxpdev->pwrseq)
-		pwrseq_put(nxpdev->pwrseq);
-	return err;
+	return nxp_register_dev(nxpdev);
 }
 
 static void __nxp_remove(struct btnxpuart_dev *nxpdev)
