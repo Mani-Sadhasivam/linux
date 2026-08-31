@@ -40,7 +40,7 @@ config POWER_SEQUENCING_PCIE_M2
 	depends on OF
 	depends on PCI
 	depends on SERIAL_DEV_BUS
-	select OF_DYNAMIC
+	select AUXILIARY_BUS
 	help
 	  Say Y here to enable the power sequencing driver for PCIe M.2
 	  connectors. This driver handles the power sequencing for the M.2
