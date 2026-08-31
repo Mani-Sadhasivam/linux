@@ -454,6 +454,7 @@ config BT_NXPUART
 	select BT_HCIUART_H4
 	select CRC32
 	select CRC8
+	select AUXILIARY_BUS
 	help
 	  NXP is serial driver required for NXP Bluetooth
 	  devices with UART interface.
