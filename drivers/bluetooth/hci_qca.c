@@ -26,7 +26,6 @@
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_graph.h>
 #include <linux/acpi.h>
 #include <linux/platform_device.h>
 #include <linux/pwrseq/consumer.h>
@@ -2384,34 +2383,6 @@ static int qca_init_regulators(struct qca_serdev *qcadev,
 	return 0;
 }
 
-static void qca_serdev_put_pwrseq(void *data)
-{
-	pwrseq_put(data);
-}
-
-static int qca_serdev_get_m2_pwrseq(struct qca_serdev *qcadev)
-{
-	struct serdev_device *serdev = qcadev->serdev_hu.serdev;
-	struct pwrseq_desc *pwrseq;
-
-	if (!of_graph_is_present(dev_of_node(&serdev->ctrl->dev)))
-		return 0;
-
-	/* The pwrseq is looked up on the serdev controller (which holds the
-	 * OF graph to the M.2 connector), but its lifetime must follow this
-	 * serdev consumer device, not the controller. So acquire it with the
-	 * non-devres pwrseq_get() and release it via a devres action bound to
-	 * &serdev->dev instead of using devm_pwrseq_get(&serdev->ctrl->dev).
-	 */
-	pwrseq = pwrseq_get(&serdev->ctrl->dev, "uart");
-	if (IS_ERR(pwrseq))
-		return PTR_ERR(pwrseq);
-
-	qcadev->pwrseq = pwrseq;
-
-	return devm_add_action_or_reset(&serdev->dev, qca_serdev_put_pwrseq, pwrseq);
-}
-
 static int qca_serdev_probe(struct serdev_device *serdev)
 {
 	struct qca_serdev *qcadev;
@@ -2442,10 +2413,6 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 	else
 		qcadev->btsoc_type = QCA_ROME;
 
-	err = qca_serdev_get_m2_pwrseq(qcadev);
-	if (err)
-		return err;
-
 	switch (qcadev->btsoc_type) {
 	case QCA_WCN3950:
 	case QCA_WCN3988:
@@ -2455,10 +2422,6 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 	case QCA_WCN6750:
 	case QCA_WCN6855:
 	case QCA_WCN7850:
-		/* M.2 connector modules are powered by the pwrseq acquired above. */
-		if (qcadev->pwrseq)
-			break;
-
 		if (!device_property_present(&serdev->dev, "enable-gpios")) {
 			/*
 			 * Backward compatibility with old DT sources. If the
